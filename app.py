@@ -1,21 +1,19 @@
-import asyncio
 import os
+import asyncio
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
+import httpx
 from nicegui import ui, run
-
-from services.documents import (
-    parse_uploaded_document,
-    quick_understanding,
-)
-from services.research import research_pass
-from services.awards import compare_award_corpus
-from services.intelligence import run_ai_understanding
 
 
 APP_TITLE = "FI Research Intelligence"
+
+
+# ============================================================
+# COLOURS
+# ============================================================
 
 ui.colors(
     primary="#0EA5E9",
@@ -26,22 +24,1000 @@ ui.colors(
     negative="#EF4444",
 )
 
-ui.query("body").classes("bg-sky-50")
+
+# ============================================================
+# LIGHT CUSTOM STYLING
+# ============================================================
+
+ui.add_head_html(
+    """
+    <style>
+
+    body {
+        background: #f5fbff;
+        color: #0f172a;
+    }
+
+    .fi-shell {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .fi-card {
+        border: 1px solid #dceff8 !important;
+        border-radius: 18px !important;
+        box-shadow: none !important;
+    }
+
+    .fi-card:hover {
+        border-color: #b9dff0 !important;
+    }
+
+    </style>
+    """
+)
 
 
-def main() -> None:
+# ============================================================
+# DOCUMENT PARSING
+# ============================================================
 
-    # ========================================================
-    # USER SESSION STATE
-    # ========================================================
+def parse_pdf(path: str) -> dict:
+
+    import pymupdf
+
+    document = pymupdf.open(path)
+
+    pages = []
+    visual_pages = []
+
+    for page_number, page in enumerate(
+        document,
+        start=1,
+    ):
+
+        text = page.get_text(
+            "text"
+        ) or ""
+
+        pages.append(
+            f"[PAGE {page_number}]\n{text}"
+        )
+
+        # Fast first pass.
+        # Do not OCR or inspect every image yet.
+        if len(text.strip()) < 250:
+
+            visual_pages.append(
+                page_number
+            )
+
+    page_count = len(
+        document
+    )
+
+    document.close()
+
+    return {
+
+        "text":
+            "\n\n".join(pages),
+
+        "pages":
+            page_count,
+
+        "visual_pages":
+            visual_pages,
+
+    }
+
+
+def parse_docx(path: str) -> dict:
+
+    from docx import Document
+
+    document = Document(
+        path
+    )
+
+    parts = []
+
+    for paragraph in document.paragraphs:
+
+        text = paragraph.text.strip()
+
+        if text:
+
+            parts.append(
+                text
+            )
+
+    for table in document.tables:
+
+        for row in table.rows:
+
+            parts.append(
+
+                " | ".join(
+                    cell.text.strip()
+                    for cell in row.cells
+                )
+
+            )
+
+    return {
+
+        "text":
+            "\n".join(parts),
+
+        "pages":
+            None,
+
+        "visual_pages":
+            [],
+
+    }
+
+
+def parse_text(path: str) -> dict:
+
+    return {
+
+        "text":
+            Path(path).read_text(
+                encoding="utf-8",
+                errors="ignore",
+            ),
+
+        "pages":
+            None,
+
+        "visual_pages":
+            [],
+
+    }
+
+
+def parse_document(
+    path: str,
+    filename: str,
+) -> dict:
+
+    suffix = Path(
+        filename
+    ).suffix.lower()
+
+    if suffix == ".pdf":
+
+        return parse_pdf(
+            path
+        )
+
+    if suffix == ".docx":
+
+        return parse_docx(
+            path
+        )
+
+    if suffix in {
+        ".txt",
+        ".md",
+    }:
+
+        return parse_text(
+            path
+        )
+
+    raise ValueError(
+        "Supported formats: PDF, DOCX, TXT, MD"
+    )
+
+
+# ============================================================
+# FAST PROPOSAL UNDERSTANDING
+# ============================================================
+
+def understand_document(
+    parsed: dict,
+) -> dict:
+
+    import re
+
+    text = parsed.get(
+        "text",
+        ""
+    )
+
+    lower = text.lower()
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    title = None
+
+    title_pattern = (
+
+        r"(?:title of research project|"
+        r"research project title|"
+        r"proposal title|"
+        r"project title)"
+
+        r"\s*[:\-]?\s*"
+
+        r"([^\n]{8,180})"
+
+    )
+
+    match = re.search(
+        title_pattern,
+        text,
+        re.IGNORECASE,
+    )
+
+    if match:
+
+        title = (
+            match
+            .group(1)
+            .strip()
+        )
+
+    # --------------------------------------------------------
+    # FUNDING INITIATIVE
+    # --------------------------------------------------------
+
+    if (
+        "living lab" in lower
+        and
+        "water" in lower
+    ):
+
+        funding_initiative = (
+            "Living Lab (Water)"
+        )
+
+    elif (
+        "industrial water solutions"
+        in lower
+        or
+        "wafer fab" in lower
+    ):
+
+        funding_initiative = (
+            "Industrial Water Solutions (IWS)"
+        )
+
+    elif (
+        "municipal water" in lower
+        or
+        "mwtd" in lower
+    ):
+
+        funding_initiative = (
+            "Municipal Water: "
+            "Technology Development (MWTD)"
+        )
+
+    elif (
+        "competitive funding "
+        "for water research"
+        in lower
+    ):
+
+        funding_initiative = (
+            "Competitive Funding "
+            "for Water Research"
+        )
+
+    else:
+
+        funding_initiative = None
+
+    # --------------------------------------------------------
+    # DOCUMENT TYPE
+    # --------------------------------------------------------
+
+    if (
+        "funding initiative" in lower
+        and
+        "desired outcomes" in lower
+    ):
+
+        document_type = (
+            "FI / programme paper"
+        )
+
+    elif (
+        "project proposal" in lower
+        or
+        "scientific abstract" in lower
+    ):
+
+        document_type = (
+            "Individual R&D proposal"
+        )
+
+    else:
+
+        document_type = (
+            "Unknown"
+        )
+
+    # --------------------------------------------------------
+    # SECTION MAP
+    # --------------------------------------------------------
+
+    known_sections = [
+
+        "Scientific Abstract",
+        "Problem Statement",
+        "Research Objectives",
+        "Technical KPIs",
+        "Methodology",
+        "Landscape Scan",
+        "Innovativeness",
+        "Commercialisation",
+        "Milestones",
+        "Budget",
+        "Impact",
+        "TRL",
+
+    ]
+
+    sections = []
+
+    for section in known_sections:
+
+        if section.lower() in lower:
+
+            sections.append({
+
+                "name":
+                    section,
+
+                "confidence":
+                    0.50,
+
+            })
+
+    # --------------------------------------------------------
+    # POTENTIAL TECHNICAL CLAIMS
+    # --------------------------------------------------------
+
+    claims = []
+
+    for line in text.splitlines():
+
+        line = line.strip()
+
+        if len(line) < 40:
+
+            continue
+
+        if re.search(
+
+            r"novel|innovative|"
+            r"improv|increase|"
+            r"reduce|demonstrat|"
+            r"achiev|target|"
+            r"performance",
+
+            line,
+
+            re.IGNORECASE,
+
+        ):
+
+            claims.append(
+                line
+            )
+
+        if len(claims) >= 12:
+
+            break
+
+    # --------------------------------------------------------
+    # SIMPLE SUMMARY
+    # --------------------------------------------------------
+
+    meaningful_lines = [
+
+        line.strip()
+
+        for line in text.splitlines()
+
+        if len(
+            line.strip()
+        ) > 80
+
+    ]
+
+    summary = None
+
+    if meaningful_lines:
+
+        summary = (
+            " ".join(
+                meaningful_lines[:3]
+            )
+        )
+
+        if len(summary) > 800:
+
+            summary = (
+                summary[:800]
+                + "..."
+            )
+
+    return {
+
+        "document": {
+
+            "filename":
+                parsed.get(
+                    "filename"
+                ),
+
+            "title":
+                title,
+
+            "funding_initiative":
+                funding_initiative,
+
+            "document_type":
+                document_type,
+
+            "pages":
+                parsed.get(
+                    "pages"
+                ),
+
+            "visual_pages":
+                parsed.get(
+                    "visual_pages",
+                    []
+                ),
+
+            "sections":
+                sections,
+
+        },
+
+        "understanding": {
+
+            "problem":
+                None,
+
+            "technology":
+                None,
+
+            "baseline":
+                None,
+
+            "proposed_solution":
+                None,
+
+            "novelty_claims":
+                [],
+
+            "trl_start":
+                None,
+
+            "trl_target":
+                None,
+
+        },
+
+        "claims":
+            claims,
+
+        "kpis":
+            [],
+
+        "summary":
+            summary,
+
+        "raw_text":
+            parsed.get(
+                "text",
+                ""
+            ),
+
+        "review_flags": [
+
+            {
+
+                "severity":
+                    "Review",
+
+                "title":
+                    "Fast-pass interpretation",
+
+                "detail":
+                    (
+                        "The proposal has been "
+                        "parsed quickly. "
+                        "The deeper AI stage is "
+                        "optional."
+                    ),
+
+            }
+
+        ],
+
+    }
+
+
+# ============================================================
+# RESEARCH SEARCH
+# ============================================================
+
+SEARCH_CACHE = {}
+
+
+async def get_json(
+    url: str,
+) -> dict:
+
+    if url in SEARCH_CACHE:
+
+        return SEARCH_CACHE[
+            url
+        ]
+
+    headers = {
+
+        "Accept":
+            "application/json",
+
+        "User-Agent":
+            "FI-Research-Intelligence/0.1",
+
+    }
+
+    async with httpx.AsyncClient(
+
+        timeout=30,
+
+        follow_redirects=True,
+
+        headers=headers,
+
+    ) as client:
+
+        for attempt in range(4):
+
+            response = await client.get(
+                url
+            )
+
+            if response.status_code == 200:
+
+                data = (
+                    response.json()
+                )
+
+                SEARCH_CACHE[
+                    url
+                ] = data
+
+                return data
+
+            if (
+                response.status_code
+                == 429
+            ):
+
+                retry_after = (
+                    response
+                    .headers
+                    .get(
+                        "Retry-After"
+                    )
+                )
+
+                try:
+
+                    delay = (
+
+                        float(
+                            retry_after
+                        )
+
+                        if retry_after
+
+                        else
+
+                        1.5
+                        * (
+                            2 ** attempt
+                        )
+
+                    )
+
+                except ValueError:
+
+                    delay = (
+                        1.5
+                        * (
+                            2 ** attempt
+                        )
+                    )
+
+                await asyncio.sleep(
+                    delay
+                )
+
+                continue
+
+            response.raise_for_status()
+
+    raise RuntimeError(
+        "Research provider unavailable after retries."
+    )
+
+
+async def research_search(
+    query: str,
+    year: int,
+    limit: int,
+) -> list:
+
+    query = query.strip()
+
+    if not query:
+
+        raise ValueError(
+            "Research query cannot be empty."
+        )
+
+    # --------------------------------------------------------
+    # OPENALEX
+    # --------------------------------------------------------
+
+    openalex_url = (
+
+        "https://api.openalex.org/works"
+
+        f"?search={quote(query)}"
+
+        f"&filter="
+        f"from_publication_date:{year}-01-01,"
+        f"type:article|review"
+
+        f"&per-page={limit}"
+
+    )
+
+    openalex_data = await get_json(
+        openalex_url
+    )
+
+    openalex_results = []
+
+    for item in openalex_data.get(
+        "results",
+        []
+    ):
+
+        location = (
+            item.get(
+                "primary_location"
+            )
+            or {}
+        )
+
+        openalex_results.append({
+
+            "source":
+                "OpenAlex",
+
+            "title":
+                item.get(
+                    "title"
+                )
+                or
+                "Untitled",
+
+            "year":
+                item.get(
+                    "publication_year"
+                ),
+
+            "citations":
+                item.get(
+                    "cited_by_count",
+                    0,
+                ),
+
+            "doi":
+                item.get(
+                    "doi"
+                ),
+
+            "url":
+                location.get(
+                    "landing_page_url"
+                )
+                or
+                item.get("doi")
+                or
+                item.get("id"),
+
+        })
+
+    # --------------------------------------------------------
+    # COURTESY DELAY
+    # --------------------------------------------------------
+
+    await asyncio.sleep(
+        0.75
+    )
+
+    # --------------------------------------------------------
+    # CROSSREF
+    # --------------------------------------------------------
+
+    crossref_url = (
+
+        "https://api.crossref.org/works"
+
+        f"?query.bibliographic="
+        f"{quote(query)}"
+
+        f"&filter="
+        f"from-pub-date:{year}-01-01"
+
+        f"&rows={limit}"
+
+    )
+
+    crossref_data = await get_json(
+        crossref_url
+    )
+
+    crossref_results = []
+
+    for item in (
+
+        crossref_data
+
+        .get(
+            "message",
+            {}
+        )
+
+        .get(
+            "items",
+            []
+        )
+
+    ):
+
+        doi = item.get(
+            "DOI"
+        )
+
+        date_parts = (
+
+            item
+
+            .get(
+                "published",
+                {}
+            )
+
+            .get(
+                "date-parts",
+                [[None]]
+            )
+
+        )
+
+        crossref_results.append({
+
+            "source":
+                "Crossref",
+
+            "title":
+                (
+                    item.get(
+                        "title"
+                    )
+                    or
+                    ["Untitled"]
+                )[0],
+
+            "year":
+                (
+                    date_parts[0][0]
+                    if date_parts
+                    else None
+                ),
+
+            "citations":
+                item.get(
+                    "is-referenced-by-count",
+                    0,
+                ),
+
+            "doi":
+                doi,
+
+            "url":
+                item.get(
+                    "URL"
+                )
+                or
+                (
+                    f"https://doi.org/{doi}"
+                    if doi
+                    else None
+                ),
+
+        })
+
+    # --------------------------------------------------------
+    # COMBINE + DEDUP
+    # --------------------------------------------------------
+
+    combined = (
+        openalex_results
+        +
+        crossref_results
+    )
+
+    seen = set()
+    unique = []
+
+    for item in combined:
+
+        key = (
+
+            item.get(
+                "doi"
+            )
+
+            or
+
+            item.get(
+                "url"
+            )
+
+            or
+
+            item.get(
+                "title"
+            )
+
+            or
+            ""
+
+        ).lower()
+
+        if (
+            not key
+            or key in seen
+        ):
+
+            continue
+
+        seen.add(
+            key
+        )
+
+        unique.append(
+            item
+        )
+
+    unique.sort(
+
+        key=lambda item:
+            item.get(
+                "citations",
+                0,
+            ),
+
+        reverse=True,
+
+    )
+
+    return unique
+
+
+# ============================================================
+# PATENT / RESEARCH LINKS
+# ============================================================
+
+def direct_research_links(
+    query: str,
+) -> list:
+
+    encoded = quote(
+        query
+    )
+
+    return [
+
+        (
+            "Google Scholar",
+
+            (
+                "https://scholar.google.com/"
+                f"scholar?q={encoded}"
+            ),
+
+        ),
+
+        (
+            "Google Patents",
+
+            (
+                "https://patents.google.com/"
+                f"?q={encoded}"
+            ),
+
+        ),
+
+        (
+            "Semantic Scholar",
+
+            (
+                "https://www.semanticscholar.org/"
+                f"search?q={encoded}"
+            ),
+
+        ),
+
+        (
+            "WIPO PATENTSCOPE",
+
+            (
+                "https://patentscope.wipo.int/"
+                "search/en/result.jsf"
+                f"?query={encoded}"
+            ),
+
+        ),
+
+        (
+            "USPTO",
+
+            (
+                "https://ppubs.uspto.gov/"
+                "pubwebapp/static/pages/"
+                "landing.html"
+            ),
+
+        ),
+
+    ]
+
+
+# ============================================================
+# MAIN APPLICATION
+# ============================================================
+
+def main():
 
     state = {
-        "proposal": None,
-        "awards": [],
-        "research": [],
-        "ai": None,
-        "busy": False,
-        "award_result": [],
+
+        "proposal":
+            None,
+
+        "awards":
+            [],
+
+        "research":
+            [],
+
+        "award_results":
+            [],
+
+        "ai":
+            None,
+
     }
 
     # ========================================================
@@ -49,219 +1025,350 @@ def main() -> None:
     # ========================================================
 
     @ui.refreshable
-    def overview_panel() -> None:
-
-        proposal = state["proposal"]
+    def overview():
 
         with ui.column().classes(
-            "w-full max-w-6xl mx-auto p-6 gap-6"
+
+            "fi-shell "
+            "w-full "
+            "p-6 "
+            "gap-6"
+
         ):
 
+            # ------------------------------------------------
+            # HERO
+            # ------------------------------------------------
+
             with ui.card().classes(
-                "w-full p-7 "
-                "bg-white "
-                "border border-sky-100 "
-                "shadow-none "
-                "rounded-2xl"
+
+                "fi-card "
+                "w-full "
+                "p-8 "
+                "bg-white"
+
             ):
 
                 ui.label(
                     "Research with context."
                 ).classes(
-                    "text-4xl font-semibold tracking-tight"
+
+                    "text-4xl "
+                    "font-semibold "
+                    "tracking-tight"
+
                 )
 
                 ui.label(
+
                     "Understand proposals, "
-                    "find prior work, and "
-                    "surface the evidence that matters."
+                    "find prior work, "
+                    "and surface "
+                    "the evidence that matters."
+
                 ).classes(
-                    "text-lg text-slate-500 max-w-3xl"
+
+                    "text-lg "
+                    "text-slate-500 "
+                    "max-w-3xl"
+
                 )
 
-            with ui.grid(columns=4).classes(
+            # ------------------------------------------------
+            # METRICS
+            # ------------------------------------------------
+
+            with ui.grid(
+                columns=4
+            ).classes(
                 "w-full gap-4"
             ):
 
                 cards = [
+
                     (
                         "Proposal",
-                        "Loaded" if proposal else "None",
+
+                        (
+                            "Loaded"
+                            if state["proposal"]
+                            else
+                            "None"
+                        ),
+
                         "description",
+
                         "primary",
+
                     ),
+
                     (
                         "Awards",
-                        len(state["awards"]),
+
+                        len(
+                            state[
+                                "awards"
+                            ]
+                        ),
+
                         "workspace_premium",
+
                         "warning",
+
                     ),
+
                     (
                         "Research",
-                        len(state["research"]),
+
+                        len(
+                            state[
+                                "research"
+                            ]
+                        ),
+
                         "science",
+
                         "positive",
+
                     ),
+
                     (
                         "AI",
-                        "Ready" if state["ai"] else "Not run",
+
+                        (
+                            "Ready"
+                            if state["ai"]
+                            else
+                            "Optional"
+                        ),
+
                         "auto_awesome",
+
                         "secondary",
+
                     ),
+
                 ]
 
-                for label, value, icon, color in cards:
+                for (
+                    label,
+                    value,
+                    icon,
+                    colour,
+                ) in cards:
 
                     with ui.card().classes(
-                        "w-full p-5 "
-                        "bg-white "
-                        "border border-sky-100 "
-                        "shadow-none "
-                        "rounded-2xl"
+
+                        "fi-card "
+                        "p-5 "
+                        "bg-white"
+
                     ):
 
                         with ui.row().classes(
-                            "w-full items-center justify-between"
+
+                            "w-full "
+                            "items-center "
+                            "justify-between"
+
                         ):
 
                             ui.label(
                                 label
                             ).classes(
-                                "text-sm text-slate-500"
+                                "text-sm "
+                                "text-slate-500"
                             )
 
                             ui.icon(
                                 icon,
-                                color=color,
+                                color=colour,
                             )
 
                         ui.label(
                             str(value)
                         ).classes(
-                            "text-2xl font-semibold text-slate-800"
+
+                            "text-2xl "
+                            "font-semibold "
+                            "mt-2"
+
                         )
 
-            with ui.card().classes(
-                "w-full p-6 "
-                "bg-white "
-                "border border-sky-100 "
-                "shadow-none "
-                "rounded-2xl"
-            ):
+            # ------------------------------------------------
+            # PROPOSAL
+            # ------------------------------------------------
 
-                ui.label(
-                    "Proposal"
-                ).classes(
-                    "text-xl font-semibold"
-                )
+            if not state["proposal"]:
 
-                if not proposal:
+                with ui.card().classes(
+
+                    "fi-card "
+                    "w-full "
+                    "p-6 "
+
+                ):
+
+                    ui.icon(
+
+                        "description",
+
+                        size="2.8rem",
+
+                        color="sky-300",
+
+                    )
 
                     ui.label(
-                        "Upload a proposal from the Document tab."
+                        "No proposal loaded"
+                    ).classes(
+                        "text-xl font-semibold"
+                    )
+
+                    ui.label(
+
+                        "Go to Document and "
+                        "upload a proposal."
+
                     ).classes(
                         "text-slate-500"
                     )
 
-                else:
+                return
 
-                    document = proposal.get(
-                        "document",
-                        {}
+            proposal = state[
+                "proposal"
+            ]
+
+            document = proposal[
+                "document"
+            ]
+
+            understanding = proposal[
+                "understanding"
+            ]
+
+            with ui.card().classes(
+
+                "fi-card "
+                "w-full "
+                "p-6 "
+
+            ):
+
+                ui.label(
+
+                    document.get(
+                        "title"
                     )
 
-                    understanding = proposal.get(
-                        "understanding",
-                        {}
+                    or
+
+                    "Title not confidently determined"
+
+                ).classes(
+
+                    "text-2xl "
+                    "font-semibold"
+
+                )
+
+                with ui.row().classes(
+                    "gap-2 mt-2"
+                ):
+
+                    ui.chip(
+
+                        document.get(
+                            "funding_initiative"
+                        )
+                        or
+                        "FI not determined",
+
+                        icon="account_balance",
+
+                        color="primary",
+
                     )
 
-                    ui.label(
-                        document.get("title")
-                        or "Title not confidently determined"
-                    ).classes(
-                        "text-2xl font-semibold mt-2"
+                    ui.chip(
+
+                        document.get(
+                            "document_type"
+                        )
+                        or
+                        "Unknown",
+
+                        icon="description",
+
                     )
 
-                    with ui.row().classes(
-                        "gap-2 mt-2"
-                    ):
+                ui.separator().classes(
+                    "my-4"
+                )
 
-                        ui.chip(
-                            document.get(
-                                "funding_initiative"
-                            )
-                            or "FI not determined",
-                            color="primary",
+                with ui.grid(
+                    columns=2
+                ).classes(
+                    "w-full gap-6"
+                ):
+
+                    with ui.column():
+
+                        ui.label(
+                            "Summary"
+                        ).classes(
+
+                            "text-xs "
+                            "uppercase "
+                            "font-semibold "
+                            "text-slate-400"
+
                         )
 
-                        ui.chip(
-                            document.get(
-                                "document_type"
+                        ui.label(
+
+                            proposal.get(
+                                "summary"
                             )
-                            or "Unknown"
+                            or
+                            "No fast-pass summary available."
+
+                        ).classes(
+                            "text-slate-700"
                         )
+
+                    with ui.column():
+
+                        ui.label(
+                            "Pages flagged for visual review"
+                        ).classes(
+
+                            "text-xs "
+                            "uppercase "
+                            "font-semibold "
+                            "text-slate-400"
+
+                        )
+
+                        ui.label(
+
+                            str(
+                                document.get(
+                                    "visual_pages",
+                                    []
+                                )
+                            )
+
+                        ).classes(
+                            "text-slate-700"
+                        )
+
+                if state["ai"]:
 
                     ui.separator().classes(
-                        "my-4"
+                        "my-5"
                     )
-
-                    with ui.grid(
-                        columns=2
-                    ).classes(
-                        "w-full gap-6"
-                    ):
-
-                        with ui.column():
-
-                            ui.label(
-                                "Problem"
-                            ).classes(
-                                "text-xs "
-                                "uppercase "
-                                "font-semibold "
-                                "text-slate-400"
-                            )
-
-                            ui.label(
-                                understanding.get(
-                                    "problem"
-                                )
-                                or
-                                "Not yet determined"
-                            ).classes(
-                                "text-slate-700"
-                            )
-
-                        with ui.column():
-
-                            ui.label(
-                                "Technology"
-                            ).classes(
-                                "text-xs "
-                                "uppercase "
-                                "font-semibold "
-                                "text-slate-400"
-                            )
-
-                            ui.label(
-                                understanding.get(
-                                    "technology"
-                                )
-                                or
-                                "Not yet determined"
-                            ).classes(
-                                "text-slate-700"
-                            )
-
-            if state["ai"]:
-
-                with ui.card().classes(
-                    "w-full p-6 "
-                    "bg-sky-50/50 "
-                    "border border-sky-100 "
-                    "shadow-none "
-                    "rounded-2xl"
-                ):
 
                     ui.label(
                         "AI findings"
@@ -269,179 +1376,116 @@ def main() -> None:
                         "text-xl font-semibold"
                     )
 
-                    render_ai_findings(
-                        state["ai"]
-                    )
+                    ai = state[
+                        "ai"
+                    ]
 
-                    ui.button(
-                        "Refresh AI analysis",
-                        icon="auto_awesome",
-                        on_click=lambda:
-                            asyncio.create_task(
-                                run_deeper_analysis()
+                    with ui.grid(
+                        columns=2
+                    ).classes(
+                        "w-full gap-4 mt-3"
+                    ):
+
+                        for (
+                            label,
+                            key,
+                        ) in [
+
+                            (
+                                "Problem",
+                                "problem",
                             ),
-                    ).props(
-                        "color=primary "
-                        "unelevated "
-                        "no-caps"
-                    ).classes(
-                        "mt-4"
-                    )
 
-            elif proposal:
-
-                with ui.card().classes(
-                    "w-full p-6 "
-                    "bg-white "
-                    "border border-sky-100 "
-                    "shadow-none "
-                    "rounded-2xl"
-                ):
-
-                    ui.label(
-                        "Deeper AI analysis"
-                    ).classes(
-                        "text-xl font-semibold"
-                    )
-
-                    ui.label(
-                        "The fast pass is complete. "
-                        "Run the deeper AI stage when your "
-                        "AI provider is configured."
-                    ).classes(
-                        "text-slate-500"
-                    )
-
-                    ui.button(
-                        "Run AI understanding",
-                        icon="auto_awesome",
-                        on_click=lambda:
-                            asyncio.create_task(
-                                run_deeper_analysis()
+                            (
+                                "Technology",
+                                "technology",
                             ),
-                    ).props(
-                        "color=primary "
-                        "unelevated "
-                        "no-caps"
-                    ).classes(
-                        "mt-4"
-                    )
 
+                            (
+                                "Baseline",
+                                "baseline",
+                            ),
 
-    def render_ai_findings(
-        ai: dict
-    ) -> None:
+                            (
+                                "Proposed solution",
+                                "proposed_solution",
+                            ),
 
-        fields = [
-            (
-                "Problem",
-                ai.get("problem"),
-            ),
-            (
-                "Technology",
-                ai.get("technology"),
-            ),
-            (
-                "Baseline",
-                ai.get("baseline"),
-            ),
-            (
-                "Proposed solution",
-                ai.get("proposed_solution"),
-            ),
-            (
-                "TRL",
-                ai.get("trl"),
-            ),
-            (
-                "Commercialisation",
-                ai.get("commercialisation"),
-            ),
-        ]
+                            (
+                                "TRL",
+                                "trl",
+                            ),
 
-        with ui.grid(columns=2).classes(
-            "w-full gap-4 mt-3"
-        ):
+                            (
+                                "Commercialisation",
+                                "commercialisation",
+                            ),
 
-            for label, value in fields:
+                        ]:
 
-                with ui.card().classes(
-                    "w-full p-4 "
-                    "bg-white "
-                    "border border-sky-100 "
-                    "shadow-none"
-                ):
+                            with ui.card().classes(
+                                "fi-card "
+                                "p-4 "
+                                "bg-sky-50"
+                            ):
 
-                    ui.label(
-                        label
-                    ).classes(
-                        "text-xs uppercase "
-                        "font-semibold text-slate-400"
-                    )
+                                ui.label(
+                                    label
+                                ).classes(
+                                    "text-xs "
+                                    "uppercase "
+                                    "font-semibold "
+                                    "text-slate-400"
+                                )
 
-                    ui.label(
-                        value or "Not determined"
-                    ).classes(
-                        "text-slate-700 mt-1"
-                    )
+                                ui.label(
 
-        flags = ai.get(
-            "review_flags",
-            []
-        )
+                                    ai.get(
+                                        key
+                                    )
+                                    or
+                                    "Not determined"
 
-        if flags:
+                                ).classes(
+                                    "text-slate-700"
+                                )
 
-            ui.separator().classes(
-                "my-4"
-            )
+                ui.button(
 
-            ui.label(
-                "Review attention"
-            ).classes(
-                "font-semibold"
-            )
+                    "Run deeper AI analysis",
 
-            for flag in flags:
+                    icon="auto_awesome",
 
-                with ui.card().classes(
-                    "w-full "
-                    "p-4 "
-                    "bg-amber-50 "
-                    "border border-amber-100 "
-                    "shadow-none"
-                ):
+                    on_click=lambda:
+                        asyncio.create_task(
+                            run_ai()
+                        ),
 
-                    ui.label(
-                        flag.get(
-                            "title",
-                            "Review flag",
-                        )
-                    ).classes(
-                        "font-semibold"
-                    )
+                ).props(
 
-                    ui.label(
-                        flag.get(
-                            "detail",
-                            "",
-                        )
-                    ).classes(
-                        "text-slate-600"
-                    )
+                    "color=primary "
+                    "unelevated "
+                    "no-caps"
+
+                ).classes(
+                    "mt-5"
+                )
 
 
     # ========================================================
-    # DOCUMENT TAB
+    # DOCUMENT VIEW
     # ========================================================
 
     @ui.refreshable
-    def document_panel() -> None:
-
-        proposal = state["proposal"]
+    def document_panel():
 
         with ui.column().classes(
-            "w-full max-w-6xl mx-auto p-6 gap-5"
+
+            "fi-shell "
+            "w-full "
+            "p-6 "
+            "gap-5"
+
         ):
 
             ui.label(
@@ -451,66 +1495,75 @@ def main() -> None:
             )
 
             ui.label(
-                "Fast document structure first, deeper AI second."
+
+                "Native extraction first. "
+                "AI interpretation second."
+
             ).classes(
                 "text-slate-500"
             )
 
-            if not proposal:
+            proposal = state[
+                "proposal"
+            ]
 
-                ui.card().classes(
-                    "fi-card w-full"
-                )
+            if not proposal:
 
                 ui.label(
                     "No proposal loaded."
                 ).classes(
-                    "text-slate-500"
+                    "text-slate-400"
                 )
 
                 return
 
-            document = proposal.get(
-                "document",
-                {}
-            )
+            d = proposal[
+                "document"
+            ]
 
-            understanding = proposal.get(
-                "understanding",
-                {}
-            )
+            u = proposal[
+                "understanding"
+            ]
 
-            with ui.grid(columns=2).classes(
+            with ui.grid(
+                columns=2
+            ).classes(
                 "w-full gap-4"
             ):
 
                 fields = [
+
                     (
                         "Problem",
                         "problem",
                     ),
+
                     (
                         "Technology",
                         "technology",
                     ),
+
                     (
                         "Baseline",
                         "baseline",
                     ),
+
                     (
                         "Proposed solution",
                         "proposed_solution",
                     ),
+
                 ]
 
-                for label, key in fields:
+                for (
+                    label,
+                    key,
+                ) in fields:
 
                     with ui.card().classes(
-                        "w-full p-5 "
-                        "bg-white "
-                        "border border-sky-100 "
-                        "shadow-none "
-                        "rounded-2xl"
+                        "fi-card "
+                        "w-full "
+                        "p-5"
                     ):
 
                         ui.label(
@@ -520,91 +1573,22 @@ def main() -> None:
                         )
 
                         ui.label(
-                            understanding.get(
+
+                            u.get(
                                 key
                             )
                             or
                             "Not determined"
+
                         ).classes(
-                            "text-slate-600 mt-2"
+                            "text-slate-600 "
+                            "mt-2"
                         )
-
-                with ui.card().classes(
-                    "w-full p-5 "
-                    "bg-white "
-                    "border border-sky-100 "
-                    "shadow-none "
-                    "rounded-2xl"
-                ):
-
-                    ui.label(
-                        "Novelty"
-                    ).classes(
-                        "font-semibold"
-                    )
-
-                    novelty = understanding.get(
-                        "novelty_claims",
-                        []
-                    )
-
-                    if not novelty:
-
-                        ui.label(
-                            "No novelty claims "
-                            "confidently extracted yet."
-                        ).classes(
-                            "text-slate-400"
-                        )
-
-                    for item in novelty:
-
-                        ui.label(
-                            "• " + str(item)
-                        ).classes(
-                            "text-slate-600"
-                        )
-
-                with ui.card().classes(
-                    "w-full p-5 "
-                    "bg-white "
-                    "border border-sky-100 "
-                    "shadow-none "
-                    "rounded-2xl"
-                ):
-
-                    ui.label(
-                        "TRL"
-                    ).classes(
-                        "font-semibold"
-                    )
-
-                    start = understanding.get(
-                        "trl_start"
-                    )
-
-                    target = understanding.get(
-                        "trl_target"
-                    )
-
-                    ui.label(
-                        (
-                            f"TRL {start} → {target}"
-                        )
-                        if start is not None
-                        else "Not determined"
-                    ).classes(
-                        "text-lg "
-                        "font-semibold "
-                        "text-sky-600"
-                    )
 
             with ui.card().classes(
-                "w-full p-5 "
-                "bg-white "
-                "border border-sky-100 "
-                "shadow-none "
-                "rounded-2xl"
+                "fi-card "
+                "w-full "
+                "p-5"
             ):
 
                 ui.label(
@@ -614,32 +1598,64 @@ def main() -> None:
                 )
 
                 rows = [
+
                     {
-                        "section": item.get("name"),
-                        "confidence": (
-                            f"{round((item.get('confidence') or 0) * 100)}%"
-                        ),
+
+                        "section":
+                            item.get(
+                                "name"
+                            ),
+
+                        "confidence":
+                            (
+                                f"{round("
+                                f"(item.get('confidence') or 0)"
+                                f" * 100)}%"
+                            ),
+
                     }
-                    for item in document.get(
+
+                    for item in d.get(
                         "sections",
                         []
                     )
+
                 ]
 
                 ui.table(
+
                     columns=[
+
                         {
-                            "name": "section",
-                            "label": "SECTION",
-                            "field": "section",
+
+                            "name":
+                                "section",
+
+                            "label":
+                                "SECTION",
+
+                            "field":
+                                "section",
+
                         },
+
                         {
-                            "name": "confidence",
-                            "label": "CONFIDENCE",
-                            "field": "confidence",
+
+                            "name":
+                                "confidence",
+
+                            "label":
+                                "CONFIDENCE",
+
+                            "field":
+                                "confidence",
+
                         },
+
                     ],
+
                     rows=rows,
+
                 ).props(
                     "flat bordered"
                 ).classes(
@@ -647,11 +1663,9 @@ def main() -> None:
                 )
 
             with ui.card().classes(
-                "w-full p-5 "
-                "bg-white "
-                "border border-sky-100 "
-                "shadow-none "
-                "rounded-2xl"
+                "fi-card "
+                "w-full "
+                "p-5"
             ):
 
                 ui.label(
@@ -687,10 +1701,15 @@ def main() -> None:
     # ========================================================
 
     @ui.refreshable
-    def awards_panel() -> None:
+    def awards_panel():
 
         with ui.column().classes(
-            "w-full max-w-6xl mx-auto p-6 gap-5"
+
+            "fi-shell "
+            "w-full "
+            "p-6 "
+            "gap-5"
+
         ):
 
             ui.label(
@@ -700,130 +1719,130 @@ def main() -> None:
             )
 
             ui.label(
-                "Load previous projects and compare them "
-                "against the current proposal."
+
+                "Load previous awards "
+                "or proposals for comparison."
+
             ).classes(
                 "text-slate-500"
             )
 
             ui.upload(
+
                 on_upload=lambda event:
                     asyncio.create_task(
-                        handle_award_upload(event)
+                        handle_award(event)
                     ),
+
                 multiple=True,
+
                 auto_upload=True,
+
                 max_files=100,
+
                 max_file_size=50_000_000,
+
             ).props(
+
                 "accept=.pdf,.docx,.txt,.md"
+
             ).classes(
                 "w-full"
             )
 
-            if not state["awards"]:
+            if not state[
+                "awards"
+            ]:
 
                 ui.label(
-                    "No award corpus loaded."
+                    "No awards loaded."
                 ).classes(
                     "text-slate-400"
                 )
 
             else:
 
-                with ui.card().classes(
-                    "w-full "
-                    "bg-white "
-                    "border border-sky-100 "
-                    "shadow-none "
-                    "rounded-2xl"
-                ):
-
-                    ui.label(
-                        f"{len(state['awards'])} award documents loaded"
-                    ).classes(
-                        "text-lg font-semibold"
-                    )
-
-                    for award in state["awards"]:
-
-                        with ui.row().classes(
-                            "items-center gap-2"
-                        ):
-
-                            ui.icon(
-                                "workspace_premium",
-                                color="warning",
-                            )
-
-                            ui.label(
-                                award["filename"]
-                            )
-
-                if state["proposal"]:
-
-                    ui.button(
-                        "Compare against current proposal",
-                        icon="compare_arrows",
-                        on_click=lambda:
-                            asyncio.create_task(
-                                run_award_comparison()
-                            ),
-                    ).props(
-                        "color=primary "
-                        "unelevated "
-                        "no-caps"
-                    )
-
-                if state["award_result"]:
+                for award in state[
+                    "awards"
+                ]:
 
                     with ui.card().classes(
+                        "fi-card "
                         "w-full "
-                        "bg-white "
-                        "border border-sky-100 "
-                        "shadow-none "
-                        "rounded-2xl"
+                        "p-4"
                     ):
 
                         ui.label(
-                            "Preliminary relationships"
+                            award[
+                                "filename"
+                            ]
                         ).classes(
-                            "text-xl font-semibold"
+                            "font-semibold"
                         )
 
-                        for item in state[
-                            "award_result"
-                        ]:
+                if state[
+                    "proposal"
+                ]:
 
-                            with ui.card().classes(
-                                "w-full "
-                                "p-4 "
-                                "bg-slate-50 "
-                                "shadow-none"
-                            ):
+                    ui.button(
 
-                                with ui.row().classes(
-                                    "items-center"
-                                ):
+                        "Compare awards",
 
-                                    ui.label(
-                                        item["filename"]
-                                    ).classes(
-                                        "font-semibold"
-                                    )
+                        icon="compare_arrows",
 
-                                    ui.space()
+                        on_click=lambda:
+                            asyncio.create_task(
+                                compare_awards()
+                            ),
 
-                                    ui.badge(
-                                        item["relationship"],
-                                        color="warning",
-                                    )
+                    ).props(
 
-                                ui.label(
-                                    item["reason"]
-                                ).classes(
-                                    "text-slate-600 mt-2"
-                                )
+                        "color=primary "
+                        "unelevated "
+                        "no-caps"
+
+                    )
+
+                for item in state[
+                    "award_results"
+                ]:
+
+                    with ui.card().classes(
+                        "fi-card "
+                        "w-full "
+                        "p-4 "
+                        "bg-slate-50"
+                    ):
+
+                        with ui.row().classes(
+                            "items-center"
+                        ):
+
+                            ui.label(
+                                item[
+                                    "filename"
+                                ]
+                            ).classes(
+                                "font-semibold"
+                            )
+
+                            ui.space()
+
+                            ui.badge(
+                                item[
+                                    "relationship"
+                                ],
+                                color="warning",
+                            )
+
+                        ui.label(
+                            item[
+                                "reason"
+                            ]
+                        ).classes(
+                            "text-slate-600 "
+                            "mt-2"
+                        )
 
 
     # ========================================================
@@ -831,10 +1850,15 @@ def main() -> None:
     # ========================================================
 
     @ui.refreshable
-    def research_panel() -> None:
+    def research_panel():
 
         with ui.column().classes(
-            "w-full max-w-6xl mx-auto p-6 gap-5"
+
+            "fi-shell "
+            "w-full "
+            "p-6 "
+            "gap-5"
+
         ):
 
             ui.label(
@@ -844,190 +1868,194 @@ def main() -> None:
             )
 
             ui.label(
-                "Search actual literature records and "
-                "open proposal-specific patent routes."
+
+                "Search literature "
+                "and follow direct "
+                "patent routes."
+
             ).classes(
                 "text-slate-500"
             )
 
-            with ui.card().classes(
-                "w-full "
-                "bg-white "
-                "border border-sky-100 "
-                "shadow-none "
-                "rounded-2xl"
-            ):
+            query = ui.input(
 
-                with ui.row().classes(
-                    "w-full items-end gap-3"
-                ):
+                "Research question "
+                "or technical claim"
 
-                    research_query = ui.input(
-                        "Research question / technical claim"
-                    ).classes(
-                        "grow"
-                    )
+            ).classes(
+                "w-full"
+            )
 
-                    from_year = ui.number(
-                        "From year",
-                        value=2020,
-                        min=1900,
-                        max=2100,
-                    )
+            year = ui.number(
 
-                    result_limit = ui.number(
-                        "Results",
-                        value=10,
-                        min=1,
-                        max=25,
-                    )
+                "From year",
 
-                    async def search():
+                value=2020,
 
-                        if not research_query.value:
+                min=1900,
 
-                            ui.notify(
-                                "Enter a research question.",
-                                type="warning",
-                            )
+                max=2100,
 
-                            return
+            )
 
-                        note = ui.notification(
-                            "Searching research...",
-                            spinner=True,
-                            timeout=None,
-                        )
+            limit = ui.number(
 
-                        try:
+                "Results",
 
-                            state["research"] = (
-                                await research_pass(
-                                    research_query.value,
-                                    int(
-                                        from_year.value
-                                    ),
-                                    int(
-                                        result_limit.value
-                                    ),
-                                )
-                            )
+                value=10,
 
-                            note.message = (
-                                f"Found "
-                                f"{len(state['research'])} "
-                                f"records."
-                            )
+                min=1,
 
-                            note.spinner = False
-                            note.type = "positive"
+                max=25,
 
-                            research_panel.refresh()
-                            overview_panel.refresh()
+            )
 
-                        except Exception as error:
+            async def search():
 
-                            note.message = (
-                                f"Research failed: {error}"
-                            )
+                note = ui.notification(
 
-                            note.spinner = False
-                            note.type = "negative"
+                    "Searching OpenAlex and Crossref...",
 
-                    ui.button(
-                        "Search",
-                        icon="search",
-                        on_click=search,
-                    ).props(
-                        "color=primary "
-                        "unelevated "
-                        "no-caps"
-                    )
+                    spinner=True,
 
-            with ui.row().classes(
-                "gap-4 flex-wrap"
-            ):
+                    timeout=None,
 
-                if research_query.value:
-                    query_for_links = (
-                        research_query.value
-                    )
-
-                elif state["proposal"]:
-                    query_for_links = (
-                        state["proposal"]
-                        .get("document", {})
-                        .get("title")
-                        or
-                        "technology"
-                    )
-
-                else:
-                    query_for_links = (
-                        "technology"
-                    )
-
-                encoded = quote(
-                    query_for_links
                 )
 
-                for name, url in [
+                try:
 
-                    (
-                        "Google Scholar",
-                        (
-                            "https://scholar.google.com/"
-                            f"scholar?q={encoded}"
+                    state[
+                        "research"
+                    ] = await research_search(
+
+                        query.value or "",
+
+                        int(
+                            year.value
                         ),
-                    ),
 
-                    (
-                        "Google Patents",
-                        (
-                            "https://patents.google.com/"
-                            f"?q={encoded}"
+                        int(
+                            limit.value
                         ),
-                    ),
 
+                    )
+
+                    note.message = (
+
+                        f"Found "
+                        f"{len(state['research'])} "
+                        f"records."
+
+                    )
+
+                    note.spinner = False
+
+                    note.type = (
+                        "positive"
+                    )
+
+                    research_panel.refresh()
+                    overview.refresh()
+
+                except Exception as error:
+
+                    note.message = (
+                        f"Search failed: "
+                        f"{error}"
+                    )
+
+                    note.spinner = False
+
+                    note.type = (
+                        "negative"
+                    )
+
+            ui.button(
+
+                "Search",
+
+                icon="search",
+
+                on_click=search,
+
+            ).props(
+
+                "color=primary "
+                "unelevated "
+                "no-caps"
+
+            )
+
+            if state["proposal"]:
+
+                proposal_title = (
+
+                    state["proposal"]
+
+                    .get("document", {})
+
+                    .get("title")
+
+                )
+
+                if (
+                    proposal_title
+                    and not query.value
+                ):
+
+                    query.value = (
+                        proposal_title
+                    )
+
+            link_query = (
+
+                query.value
+
+                or
+
+                (
                     (
-                        "Semantic Scholar",
-                        (
-                            "https://www.semanticscholar.org/"
-                            f"search?q={encoded}"
-                        ),
-                    ),
+                        state["proposal"]
+                        or {}
+                    )
+                    .get(
+                        "document",
+                        {}
+                    )
+                    .get(
+                        "title"
+                    )
+                )
 
-                    (
-                        "WIPO PATENTSCOPE",
-                        (
-                            "https://patentscope.wipo.int/"
-                            "search/en/result.jsf"
-                            f"?query={encoded}"
-                        ),
-                    ),
+                or
 
-                    (
-                        "USPTO",
-                        "https://ppubs.uspto.gov/"
-                        "pubwebapp/static/pages/"
-                        "landing.html",
-                    ),
+                "water technology"
 
-                ]:
+            )
+
+            with ui.row().classes(
+                "gap-5 flex-wrap"
+            ):
+
+                for (
+                    name,
+                    url,
+                ) in direct_research_links(
+                    link_query
+                ):
 
                     ui.link(
                         name,
                         url,
                         new_tab=True,
                     ).classes(
-                        "text-sky-600 font-semibold"
+                        "text-sky-600 "
+                        "font-semibold"
                     )
 
-            if not state["research"]:
-
-                ui.card().classes(
-                    "w-full"
-                )
+            if not state[
+                "research"
+            ]:
 
                 ui.label(
                     "No research results yet."
@@ -1042,32 +2070,50 @@ def main() -> None:
                 ]:
 
                     with ui.card().classes(
+                        "fi-card "
                         "w-full "
-                        "bg-white "
-                        "border border-sky-100 "
-                        "shadow-none "
-                        "rounded-2xl"
+                        "p-5"
                     ):
 
                         with ui.row().classes(
-                            "items-center w-full"
+                            "items-center "
+                            "w-full"
                         ):
 
                             ui.badge(
-                                paper["source"],
+
+                                paper[
+                                    "source"
+                                ],
+
                                 color=(
+
                                     "positive"
-                                    if paper["source"]
-                                    == "OpenAlex"
-                                    else "warning"
+
+                                    if paper[
+                                        "source"
+                                    ]
+                                    ==
+                                    "OpenAlex"
+
+                                    else
+
+                                    "warning"
+
                                 ),
+
                             )
 
                             ui.label(
+
                                 str(
-                                    paper.get("year")
-                                    or ""
+                                    paper.get(
+                                        "year"
+                                    )
+                                    or
+                                    ""
                                 )
+
                             ).classes(
                                 "text-slate-400"
                             )
@@ -1075,33 +2121,47 @@ def main() -> None:
                             ui.space()
 
                             ui.label(
+
                                 f"{paper.get('citations', 0)} citations"
+
                             ).classes(
                                 "text-slate-400"
                             )
 
                         ui.label(
+
                             paper.get(
                                 "title"
                             )
                             or
                             "Untitled"
+
                         ).classes(
+
                             "font-semibold "
-                            "text-slate-800 "
-                            "mt-1"
+                            "text-slate-800"
+
                         )
 
-                        if paper.get("url"):
+                        if paper.get(
+                            "url"
+                        ):
 
                             ui.link(
+
                                 "Open source ↗",
-                                paper["url"],
+
+                                paper[
+                                    "url"
+                                ],
+
                                 new_tab=True,
+
                             ).classes(
+
                                 "text-sky-600 "
-                                "font-semibold "
-                                "mt-2"
+                                "font-semibold"
+
                             )
 
 
@@ -1110,10 +2170,15 @@ def main() -> None:
     # ========================================================
 
     @ui.refreshable
-    def reviewer_panel() -> None:
+    def reviewer_panel():
 
         with ui.column().classes(
-            "w-full max-w-6xl mx-auto p-6 gap-5"
+
+            "fi-shell "
+            "w-full "
+            "p-6 "
+            "gap-5"
+
         ):
 
             ui.label(
@@ -1123,17 +2188,24 @@ def main() -> None:
             )
 
             ui.label(
-                "The system supports the panel. "
+
+                "The system provides evidence. "
                 "The panel makes the final decision."
+
             ).classes(
                 "text-slate-500"
             )
 
             criteria = [
+
                 "Science & technology",
+
                 "Impact / national benefit",
+
                 "Management & delivery",
+
                 "Budget / value",
+
             ]
 
             sliders = []
@@ -1147,11 +2219,8 @@ def main() -> None:
                 for criterion in criteria:
 
                     with ui.card().classes(
-                        "w-full "
-                        "bg-white "
-                        "border border-sky-100 "
-                        "shadow-none "
-                        "rounded-2xl"
+                        "fi-card "
+                        "p-5"
                     ):
 
                         ui.label(
@@ -1161,52 +2230,79 @@ def main() -> None:
                         )
 
                         slider = ui.slider(
+
                             min=1,
+
                             max=5,
+
                             step=1,
+
                             value=4,
+
                         ).classes(
                             "w-full"
                         )
 
                         ui.label().bind_text_from(
+
                             slider,
+
                             "value",
+
                             backward=lambda value:
-                                f"Score: {value}/5",
+
+                                f"Score: "
+                                f"{value}/5",
+
                         )
 
                         sliders.append(
                             slider
                         )
 
-            score = ui.label(
+            overall = ui.label(
                 "Overall: 4.00 / 5"
             ).classes(
+
                 "text-3xl "
                 "font-semibold "
                 "text-sky-600"
+
             )
 
             def update_score():
 
                 values = [
+
                     float(
-                        slider.value or 0
+                        slider.value
+                        or 0
                     )
+
                     for slider
                     in sliders
+
                 ]
 
                 average = (
+
                     sum(values)
-                    / len(values)
+                    /
+                    len(values)
+
                     if values
-                    else 0
+
+                    else
+
+                    0
+
                 )
 
-                score.set_text(
-                    f"Overall: {average:.2f} / 5"
+                overall.set_text(
+
+                    f"Overall: "
+                    f"{average:.2f} / 5"
+
                 )
 
             for slider in sliders:
@@ -1215,18 +2311,23 @@ def main() -> None:
                     update_score
                 )
 
+
     # ========================================================
-    # HANDLERS
+    # PROPOSAL UPLOAD
     # ========================================================
 
-    async def handle_proposal_upload(
+    async def handle_proposal(
         event
-    ) -> None:
+    ):
 
         note = ui.notification(
+
             "Receiving proposal...",
+
             spinner=True,
+
             timeout=None,
+
         )
 
         path = None
@@ -1238,73 +2339,119 @@ def main() -> None:
             ).suffix.lower()
 
             content = await run.io_bound(
+
                 event.content.read
+
             )
 
             with tempfile.NamedTemporaryFile(
+
                 delete=False,
+
                 suffix=suffix,
+
             ) as temp:
 
-                temp.write(content)
+                temp.write(
+                    content
+                )
 
-                path = temp.name
+                path = (
+                    temp.name
+                )
 
             note.message = (
-                "Extracting document..."
+                "Extracting document text..."
             )
 
             parsed = await run.io_bound(
-                parse_uploaded_document,
+
+                parse_document,
+
                 path,
+
                 event.name,
+
             )
+
+            parsed[
+                "filename"
+            ] = event.name
 
             state[
                 "proposal"
-            ] = quick_understanding(
-                parsed
+            ] = await run.io_bound(
+
+                understand_document,
+
+                parsed,
+
             )
 
-            state["ai"] = None
+            state[
+                "ai"
+            ] = None
 
             note.message = (
-                "Fast pass complete."
+                "Proposal ready."
             )
 
             note.spinner = False
-            note.type = "positive"
 
-            overview_panel.refresh()
+            note.type = (
+                "positive"
+            )
+
+            overview.refresh()
+
             document_panel.refresh()
+
+            research_panel.refresh()
 
         except Exception as error:
 
             note.message = (
-                f"Proposal failed: {error}"
+                f"Proposal upload failed: "
+                f"{error}"
             )
 
             note.spinner = False
-            note.type = "negative"
+
+            note.type = (
+                "negative"
+            )
 
         finally:
 
             if path:
 
                 try:
-                    os.unlink(path)
+
+                    os.unlink(
+                        path
+                    )
 
                 except OSError:
+
                     pass
 
-    async def handle_award_upload(
+
+    # ========================================================
+    # AWARD UPLOAD
+    # ========================================================
+
+    async def handle_award(
         event
-    ) -> None:
+    ):
 
         note = ui.notification(
+
             f"Reading {event.name}...",
+
             spinner=True,
+
             timeout=None,
+
         )
 
         path = None
@@ -1316,22 +2463,35 @@ def main() -> None:
             ).suffix.lower()
 
             content = await run.io_bound(
+
                 event.content.read
+
             )
 
             with tempfile.NamedTemporaryFile(
+
                 delete=False,
+
                 suffix=suffix,
+
             ) as temp:
 
-                temp.write(content)
+                temp.write(
+                    content
+                )
 
-                path = temp.name
+                path = (
+                    temp.name
+                )
 
             parsed = await run.io_bound(
-                parse_uploaded_document,
+
+                parse_document,
+
                 path,
+
                 event.name,
+
             )
 
             state[
@@ -1342,16 +2502,9 @@ def main() -> None:
                     event.name,
 
                 "text":
-                    parsed["text"],
-
-                "pages":
-                    parsed.get("pages"),
-
-                "visual_pages":
-                    parsed.get(
-                        "visual_pages",
-                        [],
-                    ),
+                    parsed[
+                        "text"
+                    ],
 
             })
 
@@ -1360,120 +2513,405 @@ def main() -> None:
             )
 
             note.spinner = False
-            note.type = "positive"
+
+            note.type = (
+                "positive"
+            )
 
             awards_panel.refresh()
-            overview_panel.refresh()
+
+            overview.refresh()
 
         except Exception as error:
 
             note.message = (
-                f"Award failed: {error}"
+                f"Award upload failed: "
+                f"{error}"
             )
 
             note.spinner = False
-            note.type = "negative"
+
+            note.type = (
+                "negative"
+            )
 
         finally:
 
             if path:
 
                 try:
-                    os.unlink(path)
+
+                    os.unlink(
+                        path
+                    )
 
                 except OSError:
+
                     pass
 
-    async def run_deeper_analysis():
 
-        if not state["proposal"]:
+    # ========================================================
+    # DEEPER AI
+    # ========================================================
+
+    async def run_ai():
+
+        proposal = state[
+            "proposal"
+        ]
+
+        if not proposal:
 
             ui.notify(
+
                 "Upload a proposal first.",
+
                 type="warning",
+
             )
 
             return
-
-        note = ui.notification(
-            "Running deeper AI analysis...",
-            spinner=True,
-            timeout=None,
-        )
 
         try:
 
-            state["ai"] = (
-                await run_ai_understanding(
-                    state["proposal"]
+            # Import only when requested.
+            from openai import AsyncOpenAI
+
+            api_key = os.getenv(
+                "OPENAI_API_KEY"
+            )
+
+            if not api_key:
+
+                raise RuntimeError(
+
+                    "OPENAI_API_KEY is not configured. "
+                    "The free features still work."
+
                 )
+
+            client = AsyncOpenAI(
+                api_key=api_key
             )
 
-            note.message = (
-                "AI understanding complete."
+            system_prompt = """
+
+You are a senior R&D funding proposal analyst.
+
+Read the supplied proposal carefully.
+
+Do not invent information.
+
+Separate applicant claims from established facts.
+
+Use null where unsupported.
+
+Return JSON only with:
+
+confidence
+problem
+technology
+baseline
+proposed_solution
+trl
+commercialisation
+novelty_claims
+prior_projects
+research_questions
+review_flags
+
+Each review_flags item should contain:
+
+title
+detail
+severity
+
+"""
+
+            payload = {
+
+                "document":
+                    proposal.get(
+                        "document",
+                        {}
+                    ),
+
+                "understanding":
+                    proposal.get(
+                        "understanding",
+                        {}
+                    ),
+
+                "claims":
+                    proposal.get(
+                        "claims",
+                        []
+                    ),
+
+                "source_text":
+                    proposal.get(
+                        "raw_text",
+                        ""
+                    )[:180000],
+
+            }
+
+            response = await client.responses.create(
+
+                model=os.getenv(
+                    "OPENAI_MODEL",
+                    "gpt-5",
+                ),
+
+                input=[
+
+                    {
+
+                        "role":
+                            "system",
+
+                        "content": [
+
+                            {
+
+                                "type":
+                                    "input_text",
+
+                                "text":
+                                    system_prompt,
+
+                            }
+
+                        ],
+
+                    },
+
+                    {
+
+                        "role":
+                            "user",
+
+                        "content": [
+
+                            {
+
+                                "type":
+                                    "input_text",
+
+                                "text":
+                                    __import__(
+                                        "json"
+                                    ).dumps(
+                                        payload,
+                                        ensure_ascii=False,
+                                    ),
+
+                            }
+
+                        ],
+
+                    },
+
+                ],
+
+                text={
+
+                    "format": {
+
+                        "type":
+                            "json_object",
+
+                    }
+
+                },
+
             )
 
-            note.spinner = False
-            note.type = "positive"
+            state[
+                "ai"
+            ] = __import__(
+                "json"
+            ).loads(
+                response.output_text
+            )
 
-            overview_panel.refresh()
+            overview.refresh()
+
+            ui.notify(
+
+                "AI analysis complete.",
+
+                type="positive",
+
+            )
 
         except Exception as error:
 
-            note.message = (
-                f"AI analysis failed: {error}"
+            ui.notify(
+
+                str(error),
+
+                type="negative",
+
             )
 
-            note.spinner = False
-            note.type = "negative"
 
-    async def run_award_comparison():
+    # ========================================================
+    # AWARD COMPARISON
+    # ========================================================
 
-        if not state["proposal"]:
+    async def compare_awards():
+
+        proposal = state[
+            "proposal"
+        ]
+
+        if not proposal:
 
             ui.notify(
+
                 "Upload a current proposal first.",
+
                 type="warning",
+
             )
 
             return
 
-        result = (
-            await compare_award_corpus(
-                state["proposal"],
-                state["awards"],
+        proposal_text = (
+
+            proposal.get(
+                "raw_text",
+                ""
             )
+            .lower()
+
         )
 
+        terms = [
+
+            "membrane",
+            "sludge",
+            "wastewater",
+            "desalination",
+            "pfas",
+            "carbon",
+            "resource recovery",
+            "anaerobic",
+            "electrolysis",
+            "biogas",
+            "water reuse",
+
+        ]
+
+        results = []
+
+        for award in state[
+            "awards"
+        ]:
+
+            text = award[
+                "text"
+            ].lower()
+
+            shared = [
+
+                term
+
+                for term in terms
+
+                if term in proposal_text
+                and term in text
+
+            ]
+
+            if len(shared) >= 4:
+
+                relationship = (
+                    "Potential overlap"
+                )
+
+            elif len(shared) >= 2:
+
+                relationship = (
+                    "Related / complementary"
+                )
+
+            elif len(shared) == 1:
+
+                relationship = (
+                    "Weakly related"
+                )
+
+            else:
+
+                relationship = (
+                    "No strong relationship found"
+                )
+
+            results.append({
+
+                "filename":
+                    award[
+                        "filename"
+                    ],
+
+                "relationship":
+                    relationship,
+
+                "reason":
+                    (
+                        "Shared signals: "
+                        +
+                        (
+                            ", ".join(shared)
+                            if shared
+                            else
+                            "none detected"
+                        )
+                    ),
+
+            })
+
         state[
-            "award_result"
-        ] = result
+            "award_results"
+        ] = results
 
         awards_panel.refresh()
+
 
     # ========================================================
     # HEADER
     # ========================================================
 
     with ui.header().classes(
+
         "bg-white "
         "text-slate-900 "
         "border-b border-sky-100 "
         "px-6 py-3"
+
     ):
 
         with ui.row().classes(
-            "items-center gap-3"
+
+            "w-full "
+            "fi-shell "
+            "items-center "
+            "gap-3"
+
         ):
 
             with ui.element(
                 "div"
             ).classes(
+
                 "w-9 h-9 "
                 "rounded-xl "
                 "bg-sky-500 "
                 "flex items-center "
                 "justify-center"
+
             ):
 
                 ui.icon(
@@ -1488,24 +2926,31 @@ def main() -> None:
                 ui.label(
                     APP_TITLE
                 ).classes(
-                    "text-base font-semibold"
+
+                    "text-base "
+                    "font-semibold"
+
                 )
 
                 ui.label(
                     "Proposal research workspace"
                 ).classes(
-                    "text-xs text-slate-400"
+
+                    "text-xs "
+                    "text-slate-400"
+
                 )
 
-        ui.space()
+            ui.space()
 
-        ui.badge(
-            "BETA",
-            color="primary",
-        )
+            ui.badge(
+                "BETA",
+                color="primary",
+            )
+
 
     # ========================================================
-    # NAVIGATION
+    # TABS
     # ========================================================
 
     with ui.tabs() as tabs:
@@ -1535,52 +2980,78 @@ def main() -> None:
             icon="fact_check",
         )
 
+
     with ui.tab_panels(
+
         tabs,
+
         value="Overview",
+
     ).classes(
+
         "w-full "
         "bg-transparent"
+
     ):
 
         with ui.tab_panel(
             "Overview"
         ):
-            overview_panel()
+
+            overview()
+
 
         with ui.tab_panel(
             "Document"
         ):
+
             document_panel()
+
 
         with ui.tab_panel(
             "Awards"
         ):
+
             awards_panel()
+
 
         with ui.tab_panel(
             "Research & IP"
         ):
+
             research_panel()
+
 
         with ui.tab_panel(
             "Reviewer"
         ):
+
             reviewer_panel()
 
+
+# ============================================================
+# START
+# ============================================================
 
 if __name__ == "__main__":
 
     ui.run(
+
         host="0.0.0.0",
+
         port=int(
             os.environ.get(
                 "PORT",
                 "10000",
             )
         ),
+
         title=APP_TITLE,
+
         favicon="🔬",
+
         reload=False,
+
         show=False,
+
     )
