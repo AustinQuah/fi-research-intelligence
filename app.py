@@ -1598,28 +1598,14 @@ def main():
                 )
 
                 rows = [
-
                     {
-
-                        "section":
-                            item.get(
-                                "name"
-                            ),
-
-                        "confidence":
-                            (
-                                f"{round("
-                                f"(item.get('confidence') or 0)"
-                                f" * 100)}%"
-                            ),
-
+                        "section": item.get("name"),
+                        "confidence": f"{round((item.get('confidence') or 0) * 100)}%",
                     }
-
                     for item in d.get(
                         "sections",
                         []
                     )
-
                 ]
 
                 ui.table(
