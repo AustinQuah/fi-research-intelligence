@@ -2,3 +2,4 @@ nicegui
 httpx
 PyMuPDF
 python-docx
+openai
