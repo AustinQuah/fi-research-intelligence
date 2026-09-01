@@ -1,25 +1,41 @@
 # FI Research Intelligence
 
-Research and proposal intelligence prototype.
+Python/NiceGUI research assistant for R&D proposal review.
 
 ## Features
 
-- PDF/DOCX proposal upload
+- Proposal upload
+- PDF/DOCX/TXT/MD parsing
+- Fast document structure pass
+- Claim extraction
 - Funding initiative detection
-- Document structure detection
-- Preliminary claim extraction
-- Previous award workspace
+- Previous award corpus
 - OpenAlex research search
 - Crossref research search
-- Google Scholar / Google Patents / WIPO links
+- Google Scholar links
+- Google Patents links
+- WIPO PATENTSCOPE
 - Human reviewer scoring
+- Optional OpenAI AI analysis
 
-## Run locally
+## Local run
 
 pip install -r requirements.txt
 
 python app.py
 
-Then open:
+Open:
 
 http://localhost:8000
+
+## Render
+
+Build command:
+
+pip install -r requirements.txt
+
+Start command:
+
+python app.py
+
+The application listens on 0.0.0.0 and Render's PORT.
