@@ -5,17 +5,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
-from nicegui import ui
-
-try:
-    import fitz
-except ImportError:
-    fitz = None
-
-try:
-    from docx import Document
-except ImportError:
-    Document = None
+from nicegui import ui, run
 
 
 # ============================================================
@@ -32,34 +22,32 @@ ui.colors(
     negative='#D64545',
 )
 
-ui.query('body').classes('bg-slate-50')
-
 
 # ============================================================
 # DOCUMENT PARSING
 # ============================================================
 
-def parse_pdf(path: str) -> dict:
-    if fitz is None:
-        raise RuntimeError('PyMuPDF is not installed.')
+def read_pdf(path: str) -> dict:
+    import pymupdf
 
-    document = fitz.open(path)
+    document = pymupdf.open(path)
 
     pages = []
     visual_pages = []
 
-    for number, page in enumerate(document, start=1):
+    for page_number, page in enumerate(document, start=1):
         text = page.get_text('text') or ''
 
         pages.append(
-            f'[PAGE {number}]\n{text}'
+            f'[PAGE {page_number}]\n{text}'
         )
 
+        # Flag pages which may contain figures, scans, or sparse text.
         if (
             len(text.strip()) < 500
             or page.get_images(full=True)
         ):
-            visual_pages.append(number)
+            visual_pages.append(page_number)
 
     return {
         'text': '\n\n'.join(pages),
@@ -68,17 +56,18 @@ def parse_pdf(path: str) -> dict:
     }
 
 
-def parse_docx(path: str) -> dict:
-    if Document is None:
-        raise RuntimeError('python-docx is not installed.')
+def read_docx(path: str) -> dict:
+    from docx import Document
 
     document = Document(path)
 
     parts = []
 
     for paragraph in document.paragraphs:
-        if paragraph.text.strip():
-            parts.append(paragraph.text)
+        text = paragraph.text.strip()
+
+        if text:
+            parts.append(text)
 
     for table in document.tables:
         for row in table.rows:
@@ -96,126 +85,120 @@ def parse_docx(path: str) -> dict:
     }
 
 
-def parse_document(
+def read_text(path: str) -> dict:
+    return {
+        'text': Path(path).read_text(
+            encoding='utf-8',
+            errors='ignore',
+        ),
+        'pages': None,
+        'visual_pages': [],
+    }
+
+
+def read_document(
     path: str,
     filename: str,
 ) -> dict:
 
-    extension = (
-        Path(filename)
-        .suffix
-        .lower()
-    )
+    suffix = Path(filename).suffix.lower()
 
-    if extension == '.pdf':
-        return parse_pdf(path)
+    if suffix == '.pdf':
+        return read_pdf(path)
 
-    if extension == '.docx':
-        return parse_docx(path)
+    if suffix == '.docx':
+        return read_docx(path)
 
-    if extension in {'.txt', '.md'}:
-        return {
-            'text': Path(path).read_text(
-                errors='ignore'
-            ),
-            'pages': None,
-            'visual_pages': [],
-        }
+    if suffix in {'.txt', '.md'}:
+        return read_text(path)
 
-    raise RuntimeError(
-        'Supported files: PDF, DOCX, TXT, MD'
+    raise ValueError(
+        'Supported formats: PDF, DOCX, TXT and MD.'
     )
 
 
 # ============================================================
-# SIMPLE LOCAL UNDERSTANDING
+# BROWSER-SAFE PROVISIONAL ANALYSIS
 # ============================================================
 
-def local_analysis(
+def provisional_analysis(
     text: str,
     filename: str,
-    pages,
+    pages: int | None,
+    visual_pages: list[int],
 ) -> dict:
 
     lower = text.lower()
 
     title = None
 
-    title_patterns = [
+    patterns = [
         r'(?:title of research project|'
         r'research project title|'
-        r'proposal title|'
-        r'project title)'
+        r'project title|'
+        r'proposal title)'
         r'\s*[:\-]?\s*([^\n]{8,180})'
     ]
 
-    for pattern in title_patterns:
+    for pattern in patterns:
+
         match = re.search(
             pattern,
             text,
-            re.I,
+            re.IGNORECASE,
         )
 
         if match:
-            title = (
-                match.group(1)
-                .strip()
-            )
+            title = match.group(1).strip()
             break
 
     if (
         'living lab' in lower
         and 'water' in lower
     ):
-        fi = 'Living Lab (Water)'
+        funding_initiative = (
+            'Living Lab (Water)'
+        )
 
     elif (
         'industrial water solutions'
         in lower
         or 'wafer fab' in lower
     ):
-        fi = (
-            'Industrial Water '
-            'Solutions (IWS)'
+        funding_initiative = (
+            'Industrial Water Solutions (IWS)'
         )
 
     elif (
         'municipal water' in lower
         or 'mwtd' in lower
     ):
-        fi = (
-            'Municipal Water: '
-            'Technology Development'
+        funding_initiative = (
+            'Municipal Water: Technology Development'
         )
 
     elif (
-        'competitive funding '
-        'for water research'
+        'competitive funding for water research'
         in lower
     ):
-        fi = (
-            'Competitive Funding '
-            'for Water Research'
+        funding_initiative = (
+            'Competitive Funding for Water Research'
         )
 
     else:
-        fi = None
+        funding_initiative = None
 
     if (
         'funding initiative' in lower
         and 'desired outcomes' in lower
     ):
-        document_type = (
-            'FI / programme paper'
-        )
+        document_type = 'FI / programme paper'
 
     elif (
         'project proposal' in lower
         or 'scientific abstract' in lower
     ):
-        document_type = (
-            'Individual R&D proposal'
-        )
+        document_type = 'Individual R&D proposal'
 
     else:
         document_type = 'Unknown'
@@ -238,28 +221,29 @@ def local_analysis(
     sections = []
 
     for section in section_names:
-        if section.lower() in lower:
-            sections.append({
-                'section': section,
-                'status': 'Detected',
-            })
 
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if len(line.strip()) > 35
-    ]
+        if section.lower() in lower:
+
+            sections.append({
+                'name': section,
+                'confidence': 0.50,
+            })
 
     claims = []
 
-    for line in lines:
+    for line in text.splitlines():
+
+        line = line.strip()
+
+        if len(line) < 40:
+            continue
+
         if re.search(
-            r'novel|innovative|'
-            r'improve|increase|'
-            r'reduce|demonstrate|'
-            r'achieve|target',
+            r'novel|innovative|improv|'
+            r'increase|reduce|demonstrat|'
+            r'achiev|target',
             line,
-            re.I,
+            re.IGNORECASE,
         ):
             claims.append(line)
 
@@ -267,48 +251,90 @@ def local_analysis(
             break
 
     return {
-        'filename': filename,
-        'title': title,
-        'fi': fi,
-        'document_type': document_type,
-        'pages': pages,
-        'sections': sections,
+        'document': {
+            'filename': filename,
+            'title': title,
+            'funding_initiative': funding_initiative,
+            'document_type': document_type,
+            'pages': pages,
+            'visual_pages': visual_pages,
+            'sections': sections,
+        },
+        'understanding': {
+            'problem': None,
+            'technology': None,
+            'baseline': None,
+            'proposed_solution': None,
+            'novelty_claims': [],
+            'trl_start': None,
+            'trl_target': None,
+            'prior_projects': [],
+        },
         'claims': claims,
-        'text': text,
+        'kpis': [],
+        'review_flags': [
+            {
+                'severity': 'Review',
+                'title': 'Provisional analysis',
+                'detail': (
+                    'Browser parsing is not a substitute for '
+                    'multimodal semantic analysis.'
+                ),
+            }
+        ],
     }
 
 
 # ============================================================
-# RESEARCH APIS
+# RESEARCH
 # ============================================================
 
 async def search_openalex(
     query: str,
     year: int,
     limit: int,
-) -> list:
+) -> list[dict]:
 
     url = (
         'https://api.openalex.org/works'
         f'?search={quote(query)}'
-        f'&filter=from_publication_date:'
-        f'{year}-01-01'
+        f'&filter=from_publication_date:{year}-01-01'
         f'&per-page={limit}'
     )
 
     async with httpx.AsyncClient(
         timeout=25,
         follow_redirects=True,
+        headers={
+            'User-Agent':
+                'FI-Research-Intelligence/0.1',
+            'Accept':
+                'application/json',
+        },
     ) as client:
 
-        response = await client.get(url)
+        for attempt in range(4):
 
-        if response.status_code == 429:
+            response = await client.get(url)
+
+            if response.status_code == 200:
+                data = response.json()
+                break
+
+            if response.status_code == 429:
+
+                await __import__(
+                    'asyncio'
+                ).sleep(
+                    1.5 * (2 ** attempt)
+                )
+
+                continue
+
+            response.raise_for_status()
+
+        else:
             return []
-
-        response.raise_for_status()
-
-        data = response.json()
 
     output = []
 
@@ -318,30 +344,30 @@ async def search_openalex(
     ):
 
         location = (
-            item.get('primary_location')
+            item.get(
+                'primary_location'
+            )
             or {}
         )
 
         output.append({
             'source': 'OpenAlex',
-            'title': (
+            'title':
                 item.get('title')
-                or 'Untitled'
-            ),
-            'year': item.get(
-                'publication_year'
-            ),
-            'citations': item.get(
-                'cited_by_count',
-                0,
-            ),
-            'url': (
+                or 'Untitled',
+            'year':
+                item.get('publication_year'),
+            'citations':
+                item.get(
+                    'cited_by_count',
+                    0,
+                ),
+            'url':
                 location.get(
                     'landing_page_url'
                 )
                 or item.get('doi')
-                or item.get('id')
-            ),
+                or item.get('id'),
         })
 
     return output
@@ -351,20 +377,24 @@ async def search_crossref(
     query: str,
     year: int,
     limit: int,
-) -> list:
+) -> list[dict]:
 
     url = (
         'https://api.crossref.org/works'
-        f'?query.bibliographic='
-        f'{quote(query)}'
-        f'&filter=from-pub-date:'
-        f'{year}-01-01'
+        f'?query.bibliographic={quote(query)}'
+        f'&filter=from-pub-date:{year}-01-01'
         f'&rows={limit}'
     )
 
     async with httpx.AsyncClient(
         timeout=25,
         follow_redirects=True,
+        headers={
+            'User-Agent':
+                'FI-Research-Intelligence/0.1',
+            'Accept':
+                'application/json',
+        },
     ) as client:
 
         response = await client.get(url)
@@ -381,225 +411,212 @@ async def search_crossref(
         .get('items', [])
     ):
 
-        title = (
-            item.get('title')
-            or ['Untitled']
-        )[0]
-
         doi = item.get('DOI')
-
-        date_parts = (
-            item.get('published', {})
-            .get(
-                'date-parts',
-                [[None]],
-            )
-        )
 
         output.append({
             'source': 'Crossref',
-            'title': title,
+            'title': (
+                item.get('title')
+                or ['Untitled']
+            )[0],
             'year': (
-                date_parts[0][0]
-                if date_parts
-                else None
+                (
+                    item.get('published')
+                    or {}
+                )
+                .get(
+                    'date-parts',
+                    [[None]],
+                )[0][0]
             ),
-            'citations': item.get(
-                'is-referenced-by-count',
-                0,
-            ),
-            'url': (
+            'citations':
+                item.get(
+                    'is-referenced-by-count',
+                    0,
+                ),
+            'url':
                 item.get('URL')
                 or (
                     f'https://doi.org/{doi}'
                     if doi
                     else None
-                )
-            ),
+                ),
         })
 
     return output
 
 
 # ============================================================
-# PAGE
+# MAIN PAGE
 # ============================================================
 
-@ui.page('/')
 def index():
 
-    # --------------------------------------------
-    # Per-user state
-    # --------------------------------------------
+    # Per-user state.
+    proposal = {'value': None}
+    papers = {'value': []}
+    award_names = []
 
-    state = {
-        'proposal': None,
-        'papers': [],
-        'award_files': [],
-    }
-
-    # --------------------------------------------
-    # Dynamic UI sections
-    # --------------------------------------------
+    # --------------------------------------------------------
+    # Refreshable sections
+    # --------------------------------------------------------
 
     @ui.refreshable
     def proposal_summary():
 
-        proposal = state['proposal']
+        data = proposal['value']
 
-        if proposal is None:
+        if data is None:
 
-            with ui.card() \
-                    .classes(
-                        'w-full p-6 '
-                        'bg-white'
-                    ):
+            with ui.card().classes(
+                'w-full p-6'
+            ):
 
                 ui.icon(
                     'description',
-                    size='2.5rem',
+                    size='3rem',
                     color='grey-5',
                 )
 
                 ui.label(
-                    'No proposal analysed yet'
+                    'No proposal loaded'
                 ).classes(
-                    'text-lg font-bold'
+                    'text-xl font-bold'
                 )
 
                 ui.label(
-                    'Upload a proposal to '
-                    'start the review.'
+                    'Upload a proposal to begin.'
                 ).classes(
                     'text-grey-6'
                 )
 
             return
 
-        with ui.card() \
-                .classes(
-                    'w-full p-5 '
-                    'bg-white shadow-sm'
-                ):
+        document = data['document']
+        understanding = data[
+            'understanding'
+        ]
+
+        with ui.card().classes(
+            'w-full p-5'
+        ):
 
             ui.label(
-                proposal.get('title')
+                document.get('title')
                 or 'Title not determined'
             ).classes(
                 'text-2xl font-bold'
             )
 
-            with ui.row() \
-                    .classes(
-                        'gap-2 items-center'
-                    ):
+            with ui.row().classes(
+                'items-center gap-2'
+            ):
 
                 ui.chip(
-                    proposal.get('fi')
+                    document.get(
+                        'funding_initiative'
+                    )
                     or 'FI not determined',
                     icon='account_balance',
                     color='primary',
                 )
 
                 ui.chip(
-                    proposal.get(
+                    document.get(
                         'document_type'
-                    ),
+                    )
+                    or 'Unknown',
                     icon='description',
                 )
 
             ui.separator()
 
             ui.label(
-                f"File: "
-                f"{proposal['filename']}"
+                understanding.get(
+                    'problem'
+                )
+                or
+                'Problem not yet determined.'
             ).classes(
-                'text-grey-7'
+                'text-grey-8'
             )
 
-            if proposal.get('pages'):
-                ui.label(
-                    f"Pages: "
-                    f"{proposal['pages']}"
-                ).classes(
-                    'text-grey-7'
+            ui.label(
+                'Technology: '
+                + (
+                    understanding.get(
+                        'technology'
+                    )
+                    or 'Not determined'
                 )
+            )
 
     @ui.refreshable
     def metrics():
 
-        proposal = state['proposal']
+        with ui.grid(
+            columns=4
+        ).classes(
+            'w-full gap-4'
+        ):
 
-        cards = [
-            (
-                'Claims',
-                len(
-                    proposal.get(
-                        'claims',
-                        [],
+            metric_cards = [
+                (
+                    'Claims',
+                    len(
+                        proposal['value'].get(
+                            'claims',
+                            []
+                        )
                     )
-                )
-                if proposal
-                else 0,
-                'fact_check',
-                'primary',
-            ),
-            (
-                'Sections',
-                len(
-                    proposal.get(
-                        'sections',
-                        [],
-                    )
-                )
-                if proposal
-                else 0,
-                'view_list',
-                'secondary',
-            ),
-            (
-                'Papers',
-                len(state['papers']),
-                'science',
-                'positive',
-            ),
-            (
-                'Awards',
-                len(
-                    state[
-                        'award_files'
-                    ]
+                    if proposal['value']
+                    else 0,
+                    'fact_check',
+                    'primary',
                 ),
-                'workspace_premium',
-                'warning',
-            ),
-        ]
-
-        with ui.grid(columns=4) \
-                .classes(
-                    'w-full gap-4'
-                ):
+                (
+                    'KPIs',
+                    len(
+                        proposal['value'].get(
+                            'kpis',
+                            []
+                        )
+                    )
+                    if proposal['value']
+                    else 0,
+                    'analytics',
+                    'secondary',
+                ),
+                (
+                    'Research',
+                    len(papers['value']),
+                    'science',
+                    'positive',
+                ),
+                (
+                    'Awards',
+                    len(award_names),
+                    'workspace_premium',
+                    'warning',
+                ),
+            ]
 
             for (
                 label,
                 value,
                 icon,
                 color,
-            ) in cards:
+            ) in metric_cards:
 
-                with ui.card() \
-                        .classes(
-                            'p-4 '
-                            'bg-white '
-                            'shadow-sm'
-                        ):
+                with ui.card().classes(
+                    'p-4 w-full'
+                ):
 
-                    with ui.row() \
-                            .classes(
-                                'items-center '
-                                'justify-between '
-                                'w-full'
-                            ):
+                    with ui.row().classes(
+                        'items-center '
+                        'justify-between '
+                        'w-full'
+                    ):
 
                         ui.label(
                             label
@@ -615,16 +632,15 @@ def index():
                     ui.label(
                         str(value)
                     ).classes(
-                        'text-3xl '
-                        'font-bold'
+                        'text-3xl font-bold'
                     )
 
     @ui.refreshable
-    def document_view():
+    def document_details():
 
-        proposal = state['proposal']
+        data = proposal['value']
 
-        if not proposal:
+        if data is None:
             ui.label(
                 'Upload a proposal first.'
             ).classes(
@@ -632,90 +648,125 @@ def index():
             )
             return
 
-        with ui.grid(columns=2) \
-                .classes(
-                    'w-full gap-4'
+        understanding = data[
+            'understanding'
+        ]
+
+        with ui.grid(
+            columns=2
+        ).classes(
+            'w-full gap-4'
+        ):
+
+            fields = [
+                (
+                    'Problem',
+                    'problem',
+                ),
+                (
+                    'Technology',
+                    'technology',
+                ),
+                (
+                    'Baseline',
+                    'baseline',
+                ),
+                (
+                    'Proposed solution',
+                    'proposed_solution',
+                ),
+                (
+                    'Commercialisation',
+                    'commercialisation',
+                ),
+            ]
+
+            for label, key in fields:
+
+                with ui.card().classes(
+                    'w-full'
                 ):
-
-            with ui.card() \
-                    .classes(
-                        'w-full p-5'
-                    ):
-
-                ui.label(
-                    'Detected sections'
-                ).classes(
-                    'text-lg font-bold'
-                )
-
-                for section in (
-                    proposal.get(
-                        'sections',
-                        [],
-                    )
-                ):
-
-                    with ui.row() \
-                            .classes(
-                                'items-center'
-                            ):
-
-                        ui.icon(
-                            'check_circle',
-                            color='positive',
-                        )
-
-                        ui.label(
-                            section[
-                                'section'
-                            ]
-                        )
-
-            with ui.card() \
-                    .classes(
-                        'w-full p-5'
-                    ):
-
-                ui.label(
-                    'Potential claims'
-                ).classes(
-                    'text-lg font-bold'
-                )
-
-                claims = (
-                    proposal.get(
-                        'claims',
-                        [],
-                    )
-                )
-
-                if not claims:
 
                     ui.label(
-                        'No claims '
-                        'identified.'
+                        label
+                    ).classes(
+                        'font-bold text-lg'
+                    )
+
+                    ui.label(
+                        understanding.get(
+                            key
+                        )
+                        or 'Not determined'
+                    ).classes(
+                        'text-grey-8'
+                    )
+
+            with ui.card().classes(
+                'w-full'
+            ):
+
+                ui.label(
+                    'Novelty claims'
+                ).classes(
+                    'font-bold text-lg'
+                )
+
+                novelty = understanding.get(
+                    'novelty_claims',
+                    []
+                )
+
+                if not novelty:
+                    ui.label(
+                        'None confidently identified.'
                     ).classes(
                         'text-grey-6'
                     )
 
-                for claim in claims:
+                for item in novelty:
+                    ui.label(
+                        '• ' + item
+                    )
 
-                    with ui.card() \
-                            .classes(
-                                'w-full '
-                                'bg-grey-1'
-                            ):
+    @ui.refreshable
+    def award_list():
 
-                        ui.label(
-                            claim
-                        ).classes(
-                            'text-sm'
-                        )
+        if not award_names:
+
+            ui.label(
+                'No awards loaded.'
+            ).classes(
+                'text-grey-6'
+            )
+
+            return
+
+        for name in award_names:
+
+            with ui.card().classes(
+                'w-full'
+            ):
+
+                with ui.row().classes(
+                    'items-center'
+                ):
+
+                    ui.icon(
+                        'workspace_premium',
+                        color='warning',
+                    )
+
+                    ui.label(
+                        name
+                    ).classes(
+                        'font-bold'
+                    )
 
     @ui.refreshable
     def research_results():
 
-        if not state['papers']:
+        if not papers['value']:
 
             ui.label(
                 'No research results yet.'
@@ -725,27 +776,21 @@ def index():
 
             return
 
-        for paper in state['papers']:
+        for paper in papers['value']:
 
-            with ui.card() \
-                    .classes(
-                        'w-full p-4 '
-                        'hover:shadow-md'
-                    ):
+            with ui.card().classes(
+                'w-full'
+            ):
 
-                with ui.row() \
-                        .classes(
-                            'items-center '
-                            'w-full'
-                        ):
+                with ui.row().classes(
+                    'items-center'
+                ):
 
                     ui.badge(
                         paper['source'],
                         color=(
                             'positive'
-                            if paper[
-                                'source'
-                            ]
+                            if paper['source']
                             == 'OpenAlex'
                             else 'warning'
                         ),
@@ -754,8 +799,7 @@ def index():
                     ui.label(
                         str(
                             paper.get(
-                                'year',
-                                '',
+                                'year'
                             )
                             or ''
                         )
@@ -766,8 +810,7 @@ def index():
                     ui.space()
 
                     ui.label(
-                        f"{paper.get('citations', 0)} "
-                        f"citations"
+                        f"{paper.get('citations', 0)} citations"
                     ).classes(
                         'text-grey-6'
                     )
@@ -793,72 +836,79 @@ def index():
                         'flat color=primary'
                     )
 
-    # --------------------------------------------
-    # Events
-    # --------------------------------------------
+    # --------------------------------------------------------
+    # Upload handlers
+    # --------------------------------------------------------
 
-    async def upload_proposal(event):
+    async def handle_proposal_upload(event):
 
         notification = ui.notification(
-            'Reading document...',
+            'Reading proposal...',
             spinner=True,
             timeout=None,
         )
 
-        suffix = (
-            Path(event.name)
-            .suffix
-            .lower()
-        )
+        suffix = Path(
+            event.name
+        ).suffix.lower()
 
         try:
 
             with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=suffix,
-            ) as temporary:
+            ) as temp:
 
-                temporary.write(
-                    event.content.read()
+                content = await run.io_bound(
+                    event.content.read
                 )
 
-                path = temporary.name
+                temp.write(content)
 
-            parsed = parse_document(
+                path = temp.name
+
+            parsed = await run.io_bound(
+                parse_document,
                 path,
                 event.name,
             )
 
-            state['proposal'] = (
-                local_analysis(
+            proposal['value'] = (
+                provisional_analysis(
                     parsed['text'],
                     event.name,
                     parsed['pages'],
+                    parsed['visual_pages'],
                 )
+            )
+
+            # Seed research with title if useful.
+            document = proposal[
+                'value'
+            ]['document']
+
+            query.value = (
+                document.get('title')
+                or ''
             )
 
             proposal_summary.refresh()
             metrics.refresh()
-            document_view.refresh()
-
-            query.value = (
-                state['proposal']
-                .get('title')
-                or ''
-            )
+            document_details.refresh()
 
             notification.message = (
                 'Proposal loaded'
             )
 
             notification.spinner = False
-            notification.type = 'positive'
+            notification.type = (
+                'positive'
+            )
 
         except Exception as error:
 
             notification.message = (
-                f'Could not read file: '
-                f'{error}'
+                f'Upload failed: {error}'
             )
 
             notification.spinner = False
@@ -866,11 +916,28 @@ def index():
                 'negative'
             )
 
+    async def handle_award_upload(event):
+
+        award_names.append(
+            event.name
+        )
+
+        metrics.refresh()
+        award_list.refresh()
+
+        ui.notify(
+            f'Loaded {event.name}',
+            type='positive',
+        )
+
+    # --------------------------------------------------------
+    # Research handler
+    # --------------------------------------------------------
+
     async def run_research():
 
         search_query = (
-            query.value
-            or ''
+            query.value or ''
         ).strip()
 
         if not search_query:
@@ -883,15 +950,12 @@ def index():
             return
 
         notification = ui.notification(
-            'Searching research...',
+            'Searching OpenAlex and Crossref...',
             spinner=True,
             timeout=None,
         )
 
         try:
-
-            # Sequential on purpose:
-            # kinder to public APIs.
 
             openalex = (
                 await search_openalex(
@@ -900,6 +964,11 @@ def index():
                     int(limit.value),
                 )
             )
+
+            # Courtesy delay between providers.
+            import asyncio
+
+            await asyncio.sleep(0.75)
 
             crossref = (
                 await search_crossref(
@@ -914,44 +983,41 @@ def index():
                 + crossref
             )
 
-            seen = set()
             unique = []
+            seen = set()
 
             for paper in combined:
 
                 key = (
-                    paper.get('url')
+                    paper.get('doi')
+                    or paper.get('url')
                     or paper.get('title')
                     or ''
                 ).lower()
 
-                if (
-                    not key
-                    or key in seen
-                ):
+                if not key or key in seen:
                     continue
 
                 seen.add(key)
                 unique.append(paper)
 
             unique.sort(
-                key=lambda item:
-                    item.get(
+                key=lambda x:
+                    x.get(
                         'citations',
                         0,
                     ),
                 reverse=True,
             )
 
-            state['papers'] = unique
+            papers['value'] = unique
 
             metrics.refresh()
             research_results.refresh()
 
             notification.message = (
-                f'Found '
-                f'{len(unique)} '
-                f'research records'
+                f'Found {len(unique)} '
+                'research records.'
             )
 
             notification.spinner = False
@@ -962,8 +1028,7 @@ def index():
         except Exception as error:
 
             notification.message = (
-                f'Research failed: '
-                f'{error}'
+                f'Research failed: {error}'
             )
 
             notification.spinner = False
@@ -971,95 +1036,34 @@ def index():
                 'negative'
             )
 
-    async def upload_award(event):
-
-        state[
-            'award_files'
-        ].append(
-            event.name
-        )
-
-        metrics.refresh()
-        award_list.refresh()
-
-    @ui.refreshable
-    def award_list():
-
-        if not state['award_files']:
-
-            ui.label(
-                'No previous awards '
-                'uploaded.'
-            ).classes(
-                'text-grey-6'
-            )
-
-            return
-
-        for filename in (
-            state['award_files']
-        ):
-
-            with ui.card() \
-                    .classes(
-                        'w-full'
-                    ):
-
-                with ui.row() \
-                        .classes(
-                            'items-center'
-                        ):
-
-                    ui.icon(
-                        'workspace_premium',
-                        color='warning',
-                    )
-
-                    ui.label(
-                        filename
-                    ).classes(
-                        'font-bold'
-                    )
-
-                    ui.space()
-
-                    ui.badge(
-                        'Loaded',
-                        color='positive',
-                    )
-
-    # --------------------------------------------
+    # --------------------------------------------------------
     # Header
-    # --------------------------------------------
+    # --------------------------------------------------------
 
-    with ui.header() \
-            .classes(
-                'bg-primary '
-                'items-center '
-                'px-6 py-3'
-            ):
+    with ui.header().classes(
+        'bg-primary px-6 py-3'
+    ):
 
         ui.icon(
             'hub',
             size='2rem',
         )
 
-        with ui.column() \
-                .classes('gap-0'):
+        with ui.column().classes(
+            'gap-0'
+        ):
 
             ui.label(
                 APP_TITLE
             ).classes(
-                'text-xl '
-                'font-bold'
+                'text-xl font-bold'
             )
 
             ui.label(
-                'Research • Awards • '
-                'Evidence • Review'
+                'Proposal • Awards • '
+                'Research • Review'
             ).classes(
-                'text-xs '
-                'text-blue-100'
+                'text-xs text-blue-100'
             )
 
         ui.space()
@@ -1069,62 +1073,56 @@ def index():
             color='secondary',
         )
 
-    # --------------------------------------------
-    # Navigation
-    # --------------------------------------------
+    # --------------------------------------------------------
+    # Main navigation
+    # --------------------------------------------------------
 
     with ui.tabs() as tabs:
 
-        overview_tab = ui.tab(
+        overview = ui.tab(
             'Overview',
             icon='dashboard',
         )
 
-        document_tab = ui.tab(
+        documents = ui.tab(
             'Document',
             icon='description',
         )
 
-        awards_tab = ui.tab(
+        awards = ui.tab(
             'Awards',
             icon='workspace_premium',
         )
 
-        research_tab = ui.tab(
+        research = ui.tab(
             'Research & IP',
             icon='science',
         )
 
-        review_tab = ui.tab(
+        review = ui.tab(
             'Reviewer',
             icon='fact_check',
         )
 
-    # --------------------------------------------
-    # Panels
-    # --------------------------------------------
-
     with ui.tab_panels(
         tabs,
-        value=overview_tab,
+        value=overview,
     ).classes(
-        'w-full '
-        'max-w-7xl '
-        'mx-auto '
-        'bg-transparent'
+        'w-full max-w-7xl mx-auto'
     ):
 
-        # OVERVIEW
+        # ----------------------------------------------------
+        # Overview
+        # ----------------------------------------------------
 
         with ui.tab_panel(
-            overview_tab
+            overview
         ):
 
             ui.label(
                 'Proposal workspace'
             ).classes(
-                'text-3xl '
-                'font-bold'
+                'text-3xl font-bold'
             )
 
             ui.label(
@@ -1136,7 +1134,7 @@ def index():
             )
 
             ui.upload(
-                on_upload=upload_proposal,
+                on_upload=handle_proposal_upload,
                 auto_upload=True,
                 max_file_size=30_000_000,
             ).props(
@@ -1149,10 +1147,12 @@ def index():
 
             proposal_summary()
 
-        # DOCUMENT
+        # ----------------------------------------------------
+        # Document
+        # ----------------------------------------------------
 
         with ui.tab_panel(
-            document_tab
+            documents
         ):
 
             ui.label(
@@ -1168,12 +1168,14 @@ def index():
                 'text-grey-7'
             )
 
-            document_view()
+            document_details()
 
-        # AWARDS
+        # ----------------------------------------------------
+        # Awards
+        # ----------------------------------------------------
 
         with ui.tab_panel(
-            awards_tab
+            awards
         ):
 
             ui.label(
@@ -1183,14 +1185,14 @@ def index():
             )
 
             ui.label(
-                'Add previous awards '
-                'for comparison.'
+                'Upload previous awards '
+                'or proposals.'
             ).classes(
                 'text-grey-7'
             )
 
             ui.upload(
-                on_upload=upload_award,
+                on_upload=handle_award_upload,
                 multiple=True,
                 auto_upload=True,
                 max_files=50,
@@ -1202,10 +1204,12 @@ def index():
 
             award_list()
 
-        # RESEARCH
+        # ----------------------------------------------------
+        # Research
+        # ----------------------------------------------------
 
         with ui.tab_panel(
-            research_tab
+            research
         ):
 
             ui.label(
@@ -1222,100 +1226,78 @@ def index():
                 'text-grey-7'
             )
 
-            with ui.card() \
-                    .classes(
-                        'w-full mt-4'
-                    ):
+            with ui.card().classes(
+                'w-full mt-4'
+            ):
 
                 query = ui.input(
-                    'Technology, claim, '
-                    'or research question'
+                    'Technology, claim or '
+                    'research question'
                 ).classes(
                     'w-full'
                 )
 
-                with ui.row() \
-                        .classes(
-                            'w-full '
-                            'items-end'
-                        ):
+                with ui.row().classes(
+                    'items-end gap-3'
+                ):
 
                     year = ui.number(
                         'From year',
                         value=2020,
-                        min=1900,
-                        max=2100,
                     )
 
                     limit = ui.number(
-                        'Results per source',
+                        'Results',
                         value=10,
-                        min=1,
-                        max=25,
                     )
 
                     ui.button(
-                        'Search research',
+                        'Search',
                         icon='search',
                         on_click=run_research,
+                    ).props(
+                        'color=primary'
                     )
 
-            with ui.row() \
-                    .classes(
-                        'w-full '
-                        'gap-2 mt-2'
-                    ):
+            with ui.row().classes(
+                'gap-2 mt-3'
+            ):
 
                 ui.button(
                     'Google Scholar',
-                    icon='school',
                     on_click=lambda:
                         ui.navigate.to(
-                            'https://scholar.'
-                            'google.com/',
+                            'https://scholar.google.com/',
                             new_tab=True,
                         ),
-                ).props(
-                    'outline'
-                )
+                ).props('outline')
 
                 ui.button(
                     'Google Patents',
-                    icon='lightbulb',
                     on_click=lambda:
                         ui.navigate.to(
-                            'https://patents.'
-                            'google.com/',
+                            'https://patents.google.com/',
                             new_tab=True,
                         ),
-                ).props(
-                    'outline'
-                )
+                ).props('outline')
 
                 ui.button(
                     'WIPO',
-                    icon='public',
                     on_click=lambda:
                         ui.navigate.to(
-                            'https://patentscope.'
-                            'wipo.int/',
+                            'https://patentscope.wipo.int/',
                             new_tab=True,
                         ),
-                ).props(
-                    'outline'
-                )
+                ).props('outline')
 
-            with ui.column() \
-                    .classes(
-                        'w-full mt-4'
-                    ):
+            research_results()
 
-                research_results()
-
-        # REVIEWER
+        # ----------------------------------------------------
+        # Reviewer
+        # ----------------------------------------------------
 
         with ui.tab_panel(
-            review_tab
+            review
         ):
 
             ui.label(
@@ -1325,171 +1307,85 @@ def index():
             )
 
             ui.label(
-                'AI and research evidence '
-                'support the reviewer; '
-                'they do not make the '
-                'funding decision.'
+                'The AI provides evidence; '
+                'the human makes the decision.'
             ).classes(
                 'text-grey-7'
             )
 
             criteria = [
-                (
-                    'Science & technology',
-                    25,
-                ),
-                (
-                    'Impact / '
-                    'national benefit',
-                    25,
-                ),
-                (
-                    'Management & delivery',
-                    25,
-                ),
-                (
-                    'Budget / value',
-                    25,
-                ),
+                'Science & technology',
+                'Impact / national benefit',
+                'Management & delivery',
+                'Budget / value',
             ]
 
-            review_inputs = []
+            scores = []
 
-            with ui.grid(
-                columns=2
+            for criterion in criteria:
+
+                with ui.card().classes(
+                    'w-full'
+                ):
+
+                    ui.label(
+                        criterion
+                    ).classes(
+                        'font-bold'
+                    )
+
+                    score = ui.slider(
+                        min=1,
+                        max=5,
+                        step=1,
+                        value=4,
+                    ).classes(
+                        'w-full'
+                    )
+
+                    scores.append(score)
+
+            overall = ui.label(
+                'Overall: 4.00 / 5'
             ).classes(
-                'w-full gap-4 mt-4'
-            ):
-
-                for (
-                    criterion,
-                    default_weight,
-                ) in criteria:
-
-                    with ui.card() \
-                            .classes(
-                                'w-full'
-                            ):
-
-                        ui.label(
-                            criterion
-                        ).classes(
-                            'font-bold'
-                        )
-
-                        weight = ui.number(
-                            'Weight (%)',
-                            value=(
-                                default_weight
-                            ),
-                            min=0,
-                            max=100,
-                        )
-
-                        score = ui.slider(
-                            min=1,
-                            max=5,
-                            step=1,
-                            value=4,
-                        )
-
-                        score_label = (
-                            ui.label()
-                        )
-
-                        score_label.bind_text_from(
-                            score,
-                            'value',
-                            backward=lambda value:
-                                f'Score: '
-                                f'{value}/5',
-                        )
-
-                        review_inputs.append(
-                            (
-                                weight,
-                                score,
-                            )
-                        )
-
-            total_label = ui.label(
-                'Weighted score: 4.00 / 5'
-            ).classes(
-                'text-2xl '
-                'font-bold '
+                'text-2xl font-bold '
                 'text-primary'
             )
 
-            def calculate_score():
+            def update_score():
 
-                total = 0
-                weights = 0
+                values = [
+                    float(x.value or 0)
+                    for x in scores
+                ]
 
-                for (
-                    weight,
-                    score,
-                ) in review_inputs:
-
-                    w = (
-                        float(
-                            weight.value
-                            or 0
-                        )
-                    )
-
-                    s = (
-                        float(
-                            score.value
-                            or 0
-                        )
-                    )
-
-                    total += w * s
-                    weights += w
-
-                result = (
-                    total / weights
-                    if weights
+                average = (
+                    sum(values)
+                    / len(values)
+                    if values
                     else 0
                 )
 
-                total_label.set_text(
-                    'Weighted score: '
-                    f'{result:.2f} / 5'
+                overall.set_text(
+                    f'Overall: {average:.2f} / 5'
                 )
 
-            for (
-                weight,
-                score,
-            ) in review_inputs:
-
-                weight.on_value_change(
-                    calculate_score
-                )
-
+            for score in scores:
                 score.on_value_change(
-                    calculate_score
+                    update_score
                 )
 
-            ui.textarea(
-                'Reviewer notes'
-            ).props(
-                'outlined autogrow'
-            ).classes(
-                'w-full mt-4'
-            )
 
-
-# ============================================================
-# START SERVER
-# ============================================================
-
+# IMPORTANT:
+# Render needs the server to bind to 0.0.0.0
+# and to use Render's supplied PORT.
 ui.run(
+    root=index,
     host='0.0.0.0',
     port=int(
         os.environ.get(
             'PORT',
-            8000,
+            '8000',
         )
     ),
     title=APP_TITLE,
