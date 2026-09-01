@@ -1,4 +1,1 @@
 nicegui
-httpx
-PyMuPDF
-python-docx
