@@ -41,28 +41,32 @@ def read_pdf(path: str) -> dict:
     pages = []
     visual_pages = []
 
+    total_pages = len(doc)
+
     for page_number, page in enumerate(doc, 1):
 
+        # Fast native PDF text extraction.
         text = page.get_text("text") or ""
 
         pages.append(
             f"[PAGE {page_number}]\n{text}"
         )
 
-        # Flag pages which may contain:
-        # - scans
-        # - diagrams
-        # - images
-        # - sparse text
-        if (
-            len(text.strip()) < 500
-            or page.get_images(full=True)
-        ):
+        # IMPORTANT:
+        # Do NOT inspect every page's embedded images here.
+        #
+        # page.get_images(full=True) was unnecessary work
+        # during the initial upload pass.
+        #
+        # For now, only flag suspiciously text-light pages.
+        if len(text.strip()) < 250:
             visual_pages.append(page_number)
+
+    doc.close()
 
     return {
         "text": "\n\n".join(pages),
-        "pages": len(doc),
+        "pages": total_pages,
         "visual_pages": visual_pages,
     }
 
