@@ -1616,7 +1616,7 @@ def main():
     # PROPOSAL UPLOAD
     # ========================================================
 
-       async def upload_proposal(event):
+    async def upload_proposal(event):
 
         note = ui.notification(
             "Receiving document...",
