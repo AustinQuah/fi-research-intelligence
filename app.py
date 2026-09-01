@@ -1616,142 +1616,116 @@ def main():
     # PROPOSAL UPLOAD
     # ========================================================
 
-    async def upload_proposal(event):
+       async def upload_proposal(event):
 
-    note = ui.notification(
-        "Receiving document...",
-        spinner=True,
-        timeout=None,
-    )
-
-    suffix = Path(
-        event.name
-    ).suffix.lower()
-
-    path = None
-
-    try:
-
-        # -----------------------------------------------
-        # STEP 1
-        # Receive upload
-        # -----------------------------------------------
-
-        note.message = "Receiving document..."
-
-        content = await run.io_bound(
-            event.content.read
+        note = ui.notification(
+            "Receiving document...",
+            spinner=True,
+            timeout=None,
         )
 
-        # -----------------------------------------------
-        # STEP 2
-        # Save temporary copy
-        # -----------------------------------------------
+        suffix = Path(
+            event.name
+        ).suffix.lower()
 
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix,
-        ) as temp:
+        path = None
 
-            temp.write(content)
+        try:
 
-            path = temp.name
+            note.message = "Receiving document..."
 
-        note.message = "Extracting document text..."
+            content = await run.io_bound(
+                event.content.read
+            )
 
-        # -----------------------------------------------
-        # STEP 3
-        # Parse outside NiceGUI event loop
-        # -----------------------------------------------
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix,
+            ) as temp:
 
-        parsed = await run.io_bound(
-            read_document,
-            path,
-            event.name,
-        )
+                temp.write(content)
+                path = temp.name
 
-        note.message = (
-            f"Understanding "
-            f"{parsed.get('pages') or ''} pages..."
-        )
+            note.message = "Extracting document text..."
 
-        # -----------------------------------------------
-        # STEP 4
-        # Lightweight first-pass interpretation
-        # -----------------------------------------------
+            parsed = await run.io_bound(
+                read_document,
+                path,
+                event.name,
+            )
 
-        analysis = await run.io_bound(
-            analyse_document,
-            parsed["text"],
-            event.name,
-            parsed["pages"],
-            parsed["visual_pages"],
-        )
+            page_count = parsed.get("pages")
 
-        state["proposal"] = analysis
+            if page_count:
 
-        # -----------------------------------------------
-        # STEP 5
-        # Update interface
-        # -----------------------------------------------
+                note.message = (
+                    f"Understanding {page_count} pages..."
+                )
 
-        note.message = "Updating workspace..."
+            else:
 
-        metric_cards.refresh()
+                note.message = (
+                    "Understanding document..."
+                )
 
-        proposal_summary.refresh()
+            analysis = await run.io_bound(
+                analyse_document,
+                parsed["text"],
+                event.name,
+                parsed["pages"],
+                parsed["visual_pages"],
+            )
 
-        document_details.refresh()
+            state["proposal"] = analysis
 
-        # Automatically seed research query.
-        title = (
-            analysis
-            .get("document", {})
-            .get("title")
-        )
+            note.message = "Updating workspace..."
 
-        if title:
+            metric_cards.refresh()
+            proposal_summary.refresh()
+            document_details.refresh()
 
-            query.value = title
+            title = (
+                analysis
+                .get("document", {})
+                .get("title")
+            )
 
-        # -----------------------------------------------
-        # COMPLETE
-        # -----------------------------------------------
+            if title:
+                query.value = title
 
-        page_count = (
-            parsed.get("pages")
-            or "document"
-        )
+            if page_count:
 
-        note.message = (
-            f"Ready — {page_count} "
-            f"{'pages' if isinstance(page_count, int) else ''} processed"
-        )
+                note.message = (
+                    f"Ready — {page_count} pages processed"
+                )
 
-        note.spinner = False
+            else:
 
-        note.type = "positive"
+                note.message = (
+                    "Ready — document processed"
+                )
 
-    except Exception as error:
+            note.spinner = False
+            note.type = "positive"
 
-        note.message = (
-            f"Upload failed: {error}"
-        )
+        except Exception as error:
 
-        note.spinner = False
+            note.message = (
+                f"Upload failed: {error}"
+            )
 
-        note.type = "negative"
+            note.spinner = False
+            note.type = "negative"
 
-    finally:
+        finally:
 
-        # Delete temporary server copy.
-        if path:
+            if path:
 
-            try:
-                os.unlink(path)
+                try:
+                    os.unlink(path)
 
-            except OSError:
-                pass
+                except OSError:
+                    pass
 
     # ========================================================
     # AWARD UPLOAD
