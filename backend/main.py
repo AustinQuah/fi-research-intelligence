@@ -1,7 +1,6 @@
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from fastapi import (
     FastAPI,
@@ -9,63 +8,54 @@ from fastapi import (
     UploadFile,
     HTTPException,
 )
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+
+from fastapi.middleware.cors import (
+    CORSMiddleware,
+)
 
 from services.documents import (
     parse_document,
-    quick_understanding,
+    build_document_dossier,
 )
+
 from services.research import (
-    research_pass,
-)
-from services.awards import (
-    compare_awards,
+    research_dossier,
 )
 
 
 app = FastAPI(
-    title="FI Research Intelligence",
-    version="1.0.0",
+    title="FI Research Intelligence API",
+    version="2.0.0",
 )
 
-
-# ------------------------------------------------------------
-# CORS
-# ------------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ------------------------------------------------------------
-# HEALTH CHECK
-# ------------------------------------------------------------
-
 @app.get("/api/health")
-async def health() -> dict:
+async def health():
+
     return {
-        "status": "ok"
+        "status": "ok",
+        "version": "2.0.0",
     }
 
-
-# ------------------------------------------------------------
-# PROPOSAL ANALYSIS
-# ------------------------------------------------------------
 
 @app.post("/api/proposals/analyze")
 async def analyze_proposal(
     file: UploadFile = File(...),
-) -> dict[str, Any]:
+):
 
     filename = (
         file.filename
-        or "proposal"
+        or
+        "proposal"
     )
 
     suffix = (
@@ -74,20 +64,18 @@ async def analyze_proposal(
         .lower()
     )
 
-    allowed = {
+    if suffix not in {
         ".pdf",
         ".docx",
         ".txt",
         ".md",
-    }
-
-    if suffix not in allowed:
+    }:
 
         raise HTTPException(
             status_code=400,
             detail=(
                 "Supported formats: "
-                "PDF, DOCX, TXT and MD."
+                "PDF, DOCX, TXT, MD"
             ),
         )
 
@@ -97,7 +85,9 @@ async def analyze_proposal(
 
         raise HTTPException(
             status_code=400,
-            detail="Uploaded file is empty.",
+            detail=(
+                "Uploaded file is empty."
+            ),
         )
 
     path = None
@@ -120,20 +110,28 @@ async def analyze_proposal(
             filename,
         )
 
-        result = quick_understanding(
-            parsed
+        dossier = (
+            build_document_dossier(
+                parsed
+            )
         )
 
-        return result
+        research = (
+            await research_dossier(
+                dossier
+            )
+        )
+
+        return {
+            **dossier,
+            "research": research,
+        }
 
     except Exception as error:
 
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"Document processing failed: "
-                f"{error}"
-            ),
+            detail=str(error),
         )
 
     finally:
@@ -141,107 +139,9 @@ async def analyze_proposal(
         if path:
 
             try:
-                os.unlink(path)
+                os.unlink(
+                    path
+                )
+
             except OSError:
                 pass
-
-
-# ------------------------------------------------------------
-# RESEARCH
-# ------------------------------------------------------------
-
-@app.post("/api/research/search")
-async def search_research(
-    query: str,
-    year: int = 2020,
-    limit: int = 10,
-) -> dict:
-
-    if not query.strip():
-
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Research query cannot be empty."
-            ),
-        )
-
-    try:
-
-        results = await research_pass(
-            query=query,
-            year=year,
-            limit=limit,
-        )
-
-        return {
-            "query": query,
-            "count": len(results),
-            "results": results,
-        }
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"Research provider failed: "
-                f"{error}"
-            ),
-        )
-
-
-# ------------------------------------------------------------
-# AWARD COMPARISON
-# ------------------------------------------------------------
-
-@app.post("/api/awards/compare")
-async def award_compare(
-    payload: dict,
-) -> dict:
-
-    proposal = payload.get(
-        "proposal",
-        {},
-    )
-
-    awards = payload.get(
-        "awards",
-        [],
-    )
-
-    results = await compare_awards(
-        proposal,
-        awards,
-    )
-
-    return {
-        "count": len(results),
-        "results": results,
-    }
-
-
-# ------------------------------------------------------------
-# FRONTEND
-# ------------------------------------------------------------
-
-frontend_dist = (
-    Path(__file__)
-    .resolve()
-    .parent
-    .parent
-    / "frontend"
-    / "dist"
-)
-
-
-if frontend_dist.exists():
-
-    app.mount(
-        "/",
-        StaticFiles(
-            directory=frontend_dist,
-            html=True,
-        ),
-        name="frontend",
-    )
