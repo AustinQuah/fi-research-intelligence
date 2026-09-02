@@ -1,12 +1,15 @@
+import asyncio
 import os
 import tempfile
+import uuid
 from pathlib import Path
+from typing import Any
 
 from fastapi import (
     FastAPI,
     File,
-    UploadFile,
     HTTPException,
+    UploadFile,
 )
 
 from fastapi.middleware.cors import (
@@ -14,18 +17,18 @@ from fastapi.middleware.cors import (
 )
 
 from services.documents import (
-    parse_document,
     build_document_dossier,
+    parse_document,
 )
 
 from services.research import (
-    research_dossier,
+    run_research,
 )
 
 
 app = FastAPI(
     title="FI Research Intelligence API",
-    version="2.0.0",
+    version="3.0.0",
 )
 
 
@@ -38,24 +41,41 @@ app.add_middleware(
 )
 
 
-@app.get("/api/health")
-async def health():
+# ------------------------------------------------------------
+# Temporary in-memory store.
+#
+# Fine for MVP.
+# Render restart = data disappears.
+# We'll add persistence later.
+# ------------------------------------------------------------
 
+DOCUMENTS: dict[str, dict[str, Any]] = {}
+
+
+@app.get("/")
+async def root():
     return {
-        "status": "ok",
-        "version": "2.0.0",
+        "service": "FI Research Intelligence API",
+        "status": "online",
+        "version": "3.0.0",
     }
 
 
-@app.post("/api/proposals/analyze")
-async def analyze_proposal(
+@app.get("/api/health")
+async def health():
+    return {
+        "status": "ok",
+        "version": "3.0.0",
+    }
+
+
+@app.post("/api/proposals/upload")
+async def upload_proposal(
     file: UploadFile = File(...),
 ):
-
     filename = (
         file.filename
-        or
-        "proposal"
+        or "proposal"
     )
 
     suffix = (
@@ -64,87 +84,246 @@ async def analyze_proposal(
         .lower()
     )
 
-    if suffix not in {
+    allowed = {
         ".pdf",
         ".docx",
         ".txt",
         ".md",
-    }:
+    }
 
+    if suffix not in allowed:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Supported formats: "
-                "PDF, DOCX, TXT, MD"
+                "Supported formats are "
+                "PDF, DOCX, TXT and MD."
             ),
         )
 
     content = await file.read()
 
     if not content:
-
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Uploaded file is empty."
-            ),
+            detail="Uploaded file is empty.",
         )
 
+    document_id = str(
+        uuid.uuid4()
+    )
+
+    DOCUMENTS[document_id] = {
+        "id": document_id,
+        "status": "processing",
+        "filename": filename,
+        "dossier": None,
+        "research": {
+            "status": "not_started",
+            "queries": [],
+            "evidence": [],
+        },
+        "error": None,
+    }
+
+    await process_document(
+        document_id=document_id,
+        filename=filename,
+        suffix=suffix,
+        content=content,
+    )
+
+    return {
+        "id": document_id,
+        "status": DOCUMENTS[
+            document_id
+        ]["status"],
+        "document": DOCUMENTS[
+            document_id
+        ]["dossier"],
+    }
+
+
+async def process_document(
+    document_id: str,
+    filename: str,
+    suffix: str,
+    content: bytes,
+):
     path = None
 
     try:
-
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=suffix,
         ) as temp:
-
-            temp.write(
-                content
-            )
-
+            temp.write(content)
             path = temp.name
 
-        parsed = parse_document(
+        parsed = await asyncio.to_thread(
+            parse_document,
             path,
             filename,
         )
 
-        dossier = (
-            build_document_dossier(
-                parsed
-            )
+        dossier = await asyncio.to_thread(
+            build_document_dossier,
+            parsed,
         )
 
-        research = (
-            await research_dossier(
-                dossier
-            )
-        )
+        DOCUMENTS[
+            document_id
+        ]["dossier"] = dossier
 
-        return {
-            **dossier,
-            "research": research,
-        }
+        DOCUMENTS[
+            document_id
+        ]["status"] = "ready"
 
     except Exception as error:
+        DOCUMENTS[
+            document_id
+        ]["status"] = "error"
+
+        DOCUMENTS[
+            document_id
+        ]["error"] = str(error)
 
         raise HTTPException(
             status_code=500,
-            detail=str(error),
+            detail=(
+                "Document processing failed: "
+                f"{error}"
+            ),
         )
 
     finally:
-
-        # Ensure temporary file is removed but do NOT re-run
-        # parsing or return from here. Previously this block
-        # attempted to re-parse the file and return a value,
-        # which could raise errors and override the successful
-        # response. Keep cleanup only.
         if path:
             try:
-                os.unlink(
-                    path
-                )
+                os.unlink(path)
             except OSError:
                 pass
+
+
+@app.get("/api/proposals/{document_id}")
+async def get_proposal(
+    document_id: str,
+):
+    item = DOCUMENTS.get(
+        document_id
+    )
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    return item
+
+
+@app.post(
+    "/api/proposals/{document_id}/research"
+)
+async def start_research(
+    document_id: str,
+):
+    item = DOCUMENTS.get(
+        document_id
+    )
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if not item.get("dossier"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Document analysis is "
+                "not ready."
+            ),
+        )
+
+    if (
+        item["research"]["status"]
+        == "running"
+    ):
+        return {
+            "status": "running",
+        }
+
+    item["research"] = {
+        "status": "running",
+        "queries": [],
+        "evidence": [],
+    }
+
+    asyncio.create_task(
+        research_background(
+            document_id
+        )
+    )
+
+    return {
+        "status": "running",
+    }
+
+
+async def research_background(
+    document_id: str,
+):
+    item = DOCUMENTS.get(
+        document_id
+    )
+
+    if not item:
+        return
+
+    try:
+        result = await run_research(
+            item["dossier"]
+        )
+
+        item["research"] = result
+
+    except Exception as error:
+        item["research"] = {
+            "status": "error",
+            "queries": [],
+            "evidence": [],
+            "error": str(error),
+        }
+
+
+@app.get(
+    "/api/proposals/{document_id}/research"
+)
+async def get_research(
+    document_id: str,
+):
+    item = DOCUMENTS.get(
+        document_id
+    )
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    return item["research"]
+
+
+# ------------------------------------------------------------
+# Compatibility endpoint.
+#
+# Keep this temporarily so old frontend requests
+# don't instantly explode during deployment.
+# ------------------------------------------------------------
+
+@app.post("/api/proposals/analyze")
+async def analyze_compatibility(
+    file: UploadFile = File(...),
+):
+    return await upload_proposal(file)
