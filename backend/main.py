@@ -5,32 +5,17 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import (
-    FastAPI,
-    File,
-    HTTPException,
-    UploadFile,
-)
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi.middleware.cors import (
-    CORSMiddleware,
-)
-
-from services.documents import (
-    build_document_dossier,
-    parse_document,
-)
-
-from services.research import (
-    run_research,
-)
+from services.documents import build_document_dossier, parse_document
+from services.research import calculate_novelty, run_research
 
 
 app = FastAPI(
     title="FI Research Intelligence API",
-    version="3.0.0",
+    version="4.0.0",
 )
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,15 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ------------------------------------------------------------
-# Temporary in-memory store.
-#
-# Fine for MVP.
-# Render restart = data disappears.
-# We'll add persistence later.
-# ------------------------------------------------------------
-
 DOCUMENTS: dict[str, dict[str, Any]] = {}
 
 
@@ -57,7 +33,7 @@ async def root():
     return {
         "service": "FI Research Intelligence API",
         "status": "online",
-        "version": "3.0.0",
+        "version": "4.0.0",
     }
 
 
@@ -65,7 +41,7 @@ async def root():
 async def health():
     return {
         "status": "ok",
-        "version": "3.0.0",
+        "version": "4.0.0",
     }
 
 
@@ -73,31 +49,13 @@ async def health():
 async def upload_proposal(
     file: UploadFile = File(...),
 ):
-    filename = (
-        file.filename
-        or "proposal"
-    )
+    filename = file.filename or "proposal"
+    suffix = Path(filename).suffix.lower()
 
-    suffix = (
-        Path(filename)
-        .suffix
-        .lower()
-    )
-
-    allowed = {
-        ".pdf",
-        ".docx",
-        ".txt",
-        ".md",
-    }
-
-    if suffix not in allowed:
+    if suffix not in {".pdf", ".docx", ".txt", ".md"}:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Supported formats are "
-                "PDF, DOCX, TXT and MD."
-            ),
+            detail="Supported formats are PDF, DOCX, TXT and MD.",
         )
 
     content = await file.read()
@@ -108,9 +66,7 @@ async def upload_proposal(
             detail="Uploaded file is empty.",
         )
 
-    document_id = str(
-        uuid.uuid4()
-    )
+    document_id = str(uuid.uuid4())
 
     DOCUMENTS[document_id] = {
         "id": document_id,
@@ -122,24 +78,21 @@ async def upload_proposal(
             "queries": [],
             "evidence": [],
         },
+        "novelty": None,
         "error": None,
     }
 
     await process_document(
-        document_id=document_id,
-        filename=filename,
-        suffix=suffix,
-        content=content,
+        document_id,
+        filename,
+        suffix,
+        content,
     )
 
     return {
         "id": document_id,
-        "status": DOCUMENTS[
-            document_id
-        ]["status"],
-        "document": DOCUMENTS[
-            document_id
-        ]["dossier"],
+        "status": DOCUMENTS[document_id]["status"],
+        "document": DOCUMENTS[document_id]["dossier"],
     }
 
 
@@ -170,30 +123,18 @@ async def process_document(
             parsed,
         )
 
-        DOCUMENTS[
-            document_id
-        ]["dossier"] = dossier
+        DOCUMENTS[document_id]["dossier"] = dossier
+        DOCUMENTS[document_id]["status"] = "ready"
 
-        DOCUMENTS[
-            document_id
-        ]["status"] = "ready"
+        if dossier.get("status") != "needs_visual_processing":
+            DOCUMENTS[document_id]["research"]["status"] = "running"
+            asyncio.create_task(
+                run_research_pipeline(document_id)
+            )
 
     except Exception as error:
-        DOCUMENTS[
-            document_id
-        ]["status"] = "error"
-
-        DOCUMENTS[
-            document_id
-        ]["error"] = str(error)
-
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Document processing failed: "
-                f"{error}"
-            ),
-        )
+        DOCUMENTS[document_id]["status"] = "error"
+        DOCUMENTS[document_id]["error"] = str(error)
 
     finally:
         if path:
@@ -203,13 +144,42 @@ async def process_document(
                 pass
 
 
+async def run_research_pipeline(
+    document_id: str,
+):
+    item = DOCUMENTS.get(document_id)
+
+    if not item or not item.get("dossier"):
+        return
+
+    try:
+        result = await run_research(
+            item["dossier"]
+        )
+
+        item["research"] = result
+
+        item["novelty"] = calculate_novelty(
+            item["dossier"],
+            result,
+        )
+
+    except Exception as error:
+        item["research"] = {
+            "status": "error",
+            "queries": [],
+            "evidence": [],
+            "error": str(error),
+        }
+
+        item["novelty"] = None
+
+
 @app.get("/api/proposals/{document_id}")
 async def get_proposal(
     document_id: str,
 ):
-    item = DOCUMENTS.get(
-        document_id
-    )
+    item = DOCUMENTS.get(document_id)
 
     if not item:
         raise HTTPException(
@@ -220,91 +190,11 @@ async def get_proposal(
     return item
 
 
-@app.post(
-    "/api/proposals/{document_id}/research"
-)
-async def start_research(
-    document_id: str,
-):
-    item = DOCUMENTS.get(
-        document_id
-    )
-
-    if not item:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found.",
-        )
-
-    if not item.get("dossier"):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Document analysis is "
-                "not ready."
-            ),
-        )
-
-    if (
-        item["research"]["status"]
-        == "running"
-    ):
-        return {
-            "status": "running",
-        }
-
-    item["research"] = {
-        "status": "running",
-        "queries": [],
-        "evidence": [],
-    }
-
-    asyncio.create_task(
-        research_background(
-            document_id
-        )
-    )
-
-    return {
-        "status": "running",
-    }
-
-
-async def research_background(
-    document_id: str,
-):
-    item = DOCUMENTS.get(
-        document_id
-    )
-
-    if not item:
-        return
-
-    try:
-        result = await run_research(
-            item["dossier"]
-        )
-
-        item["research"] = result
-
-    except Exception as error:
-        item["research"] = {
-            "status": "error",
-            "queries": [],
-            "evidence": [],
-            "error": str(error),
-        }
-
-
-@app.get(
-    "/api/proposals/{document_id}/research"
-)
+@app.get("/api/proposals/{document_id}/research")
 async def get_research(
     document_id: str,
 ):
-    item = DOCUMENTS.get(
-        document_id
-    )
+    item = DOCUMENTS.get(document_id)
 
     if not item:
         raise HTTPException(
@@ -315,15 +205,28 @@ async def get_research(
     return item["research"]
 
 
-# ------------------------------------------------------------
-# Compatibility endpoint.
-#
-# Keep this temporarily so old frontend requests
-# don't instantly explode during deployment.
-# ------------------------------------------------------------
-
-@app.post("/api/proposals/analyze")
-async def analyze_compatibility(
-    file: UploadFile = File(...),
+@app.get("/api/proposals/{document_id}/novelty")
+async def get_novelty(
+    document_id: str,
 ):
-    return await upload_proposal(file)
+    item = DOCUMENTS.get(document_id)
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if item["novelty"] is None:
+        return {
+            "status": item["research"].get(
+                "status",
+                "not_ready",
+            ),
+            "novelty": None,
+        }
+
+    return {
+        "status": "complete",
+        "novelty": item["novelty"],
+    }
