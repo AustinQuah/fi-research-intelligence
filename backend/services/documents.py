@@ -2,26 +2,92 @@ from pathlib import Path
 import re
 
 
+SECTION_NAMES = [
+    "scientific abstract",
+    "abstract",
+    "executive summary",
+    "problem statement",
+    "background",
+    "research objectives",
+    "objectives",
+    "technical kpis",
+    "key performance indicators",
+    "methodology",
+    "approach",
+    "landscape scan",
+    "literature review",
+    "innovativeness",
+    "innovation",
+    "commercialisation",
+    "commercialization",
+    "milestones",
+    "budget",
+    "impact",
+    "trl",
+]
+
+
+TECHNICAL_PATTERNS = [
+    r"\bmembrane(?:s)?\b",
+    r"\bdesalination\b",
+    r"\bwastewater\b",
+    r"\bwater treatment\b",
+    r"\bwater reuse\b",
+    r"\breverse osmosis\b",
+    r"\bultrafiltration\b",
+    r"\bmicrofiltration\b",
+    r"\bnanofiltration\b",
+    r"\bceramic membrane(?:s)?\b",
+    r"\banaerobic\b",
+    r"\belectrolysis\b",
+    r"\belectrochemical\b",
+    r"\badsorption\b",
+    r"\boxidation\b",
+    r"\bfiltration\b",
+    r"\bresource recovery\b",
+    r"\bcarbon capture\b",
+    r"\bPFAS\b",
+    r"\bsludge\b",
+    r"\bbiogas\b",
+]
+
+
+CLAIM_PATTERN = re.compile(
+    r"\b("
+    r"novel|innovative|improve|improved|improvement|"
+    r"increase|increased|reduce|reduced|reduction|"
+    r"achieve|achieved|target|demonstrate|demonstrated|"
+    r"performance|efficiency|higher|lower|enhance|enhanced"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+KPI_PATTERN = re.compile(
+    r"("
+    r"\d+(?:\.\d+)?\s*%|"
+    r"\d+(?:\.\d+)?\s*(?:mg\/l|g\/l|kg\/m3|"
+    r"m3\/day|m³\/day|bar|kwh|kw|mw|ppm|ppb)|"
+    r"trl\s*\d+"
+    r")",
+    re.IGNORECASE,
+)
+
+
 def parse_document(
     path: str,
     filename: str,
 ) -> dict:
 
-    suffix = (
-        Path(filename)
-        .suffix
-        .lower()
-    )
+    suffix = Path(filename).suffix.lower()
 
     if suffix == ".pdf":
-
         return parse_pdf(
             path,
             filename,
         )
 
     if suffix == ".docx":
-
         return parse_docx(
             path,
             filename,
@@ -32,23 +98,22 @@ def parse_document(
         ".md",
     }:
 
+        text = Path(path).read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
         return {
-
-            "filename":
-                filename,
-
-            "text":
-                Path(path).read_text(
-                    encoding="utf-8",
-                    errors="ignore",
-                ),
-
-            "pages":
-                None,
-
-            "visual_pages":
-                [],
-
+            "filename": filename,
+            "text": text,
+            "pages": [
+                {
+                    "page": 1,
+                    "text": text,
+                    "needs_visual_review": False,
+                }
+            ],
+            "page_count": 1,
         }
 
     raise ValueError(
@@ -68,56 +133,37 @@ def parse_pdf(
     )
 
     pages = []
-    visual_pages = []
 
-    for number, page in enumerate(
+    for page_number, page in enumerate(
         document,
         start=1,
     ):
 
         text = (
-            page
-            .get_text("text")
+            page.get_text("text")
             or ""
-        )
+        ).strip()
 
         pages.append(
-            f"[PAGE {number}]\n{text}"
+            {
+                "page": page_number,
+                "text": text,
+                "needs_visual_review": (
+                    len(text) < 200
+                ),
+            }
         )
-
-        # Fast pass:
-        # sparse pages are flagged
-        # for future visual processing.
-        if len(
-            text.strip()
-        ) < 250:
-
-            visual_pages.append(
-                number
-            )
-
-    page_count = len(
-        document
-    )
 
     document.close()
 
     return {
-
-        "filename":
-            filename,
-
-        "text":
-            "\n\n".join(
-                pages
-            ),
-
-        "pages":
-            page_count,
-
-        "visual_pages":
-            visual_pages,
-
+        "filename": filename,
+        "text": "\n\n".join(
+            item["text"]
+            for item in pages
+        ),
+        "pages": pages,
+        "page_count": len(pages),
     }
 
 
@@ -132,63 +178,211 @@ def parse_docx(
         path
     )
 
-    parts = []
+    blocks = []
 
-    for paragraph in (
-        document.paragraphs
-    ):
+    for paragraph in document.paragraphs:
 
-        text = (
-            paragraph
-            .text
-            .strip()
-        )
+        text = paragraph.text.strip()
 
         if text:
+            blocks.append(text)
 
-            parts.append(
-                text
-            )
-
-    for table in (
-        document.tables
-    ):
+    for table in document.tables:
 
         for row in table.rows:
 
-            parts.append(
-
-                " | ".join(
-
-                    cell.text.strip()
-
-                    for cell
-                    in row.cells
-
-                )
-
+            row_text = " | ".join(
+                cell.text.strip()
+                for cell in row.cells
             )
 
+            if row_text.strip():
+                blocks.append(
+                    row_text
+                )
+
+    text = "\n".join(
+        blocks
+    )
+
     return {
-
-        "filename":
-            filename,
-
-        "text":
-            "\n".join(
-                parts
-            ),
-
-        "pages":
-            None,
-
-        "visual_pages":
-            [],
-
+        "filename": filename,
+        "text": text,
+        "pages": [
+            {
+                "page": 1,
+                "text": text,
+                "needs_visual_review": False,
+            }
+        ],
+        "page_count": None,
     }
 
 
-def quick_understanding(
+def extract_title(
+    text: str,
+    filename: str,
+) -> str:
+
+    patterns = [
+        (
+            r"(?:title of research project|"
+            r"research project title|"
+            r"proposal title|project title)"
+            r"\s*[:\-]?\s*([^\n]{8,200})"
+        ),
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE,
+        )
+
+        if match:
+
+            candidate = (
+                match.group(1)
+                .strip()
+            )
+
+            if candidate:
+                return candidate
+
+    # Fallback:
+    # first substantial line rather than
+    # making up a document title.
+
+    for line in text.splitlines():
+
+        clean = line.strip()
+
+        if (
+            15 <= len(clean) <= 180
+            and not clean.startswith("[")
+        ):
+
+            return clean
+
+    return Path(filename).stem
+
+
+def extract_concepts(
+    text: str,
+) -> list:
+
+    concepts = []
+
+    for pattern in TECHNICAL_PATTERNS:
+
+        matches = re.findall(
+            pattern,
+            text,
+            re.IGNORECASE,
+        )
+
+        for match in matches:
+
+            concept = (
+                match
+                if isinstance(match, str)
+                else match[0]
+            )
+
+            concept = (
+                concept
+                .strip()
+                .lower()
+            )
+
+            if (
+                concept
+                and concept not in concepts
+            ):
+                concepts.append(
+                    concept
+                )
+
+    return concepts[:12]
+
+
+def analyze_page(
+    page: dict,
+) -> dict:
+
+    text = page.get(
+        "text",
+        "",
+    )
+
+    lower = text.lower()
+
+    sections = []
+
+    for section in SECTION_NAMES:
+
+        if section in lower:
+
+            sections.append(
+                section.title()
+            )
+
+    concepts = extract_concepts(
+        text
+    )
+
+    claims = []
+
+    kpis = []
+
+    for line in text.splitlines():
+
+        clean = line.strip()
+
+        if len(clean) < 30:
+            continue
+
+        if CLAIM_PATTERN.search(
+            clean
+        ):
+
+            claims.append(
+                clean
+            )
+
+        if KPI_PATTERN.search(
+            clean
+        ):
+
+            kpis.append(
+                clean
+            )
+
+    return {
+        "page": page.get(
+            "page"
+        ),
+        "sections": sections[:8],
+        "concepts": concepts,
+        "claims": claims[:8],
+        "kpis": kpis[:8],
+        "needs_visual_review": (
+            page.get(
+                "needs_visual_review",
+                False,
+            )
+        ),
+        "text_preview": (
+            text[:1200]
+            if text
+            else ""
+        ),
+    }
+
+
+def build_document_dossier(
     parsed: dict,
 ) -> dict:
 
@@ -197,315 +391,95 @@ def quick_understanding(
         "",
     )
 
-    lower = text.lower()
-
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
-
-    title = None
-
-    match = re.search(
-
-        r"(?:title of research project|"
-        r"research project title|"
-        r"proposal title|"
-        r"project title)"
-        r"\s*[:\-]?\s*([^\n]{8,180})",
-
+    title = extract_title(
         text,
-
-        re.IGNORECASE,
-
+        parsed.get(
+            "filename",
+            "proposal",
+        ),
     )
 
-    if match:
-
-        title = (
-            match
-            .group(1)
-            .strip()
+    page_analysis = [
+        analyze_page(page)
+        for page in parsed.get(
+            "pages",
+            []
         )
-
-    # --------------------------------------------------------
-    # FI
-    # --------------------------------------------------------
-
-    if (
-        "living lab" in lower
-        and "water" in lower
-    ):
-
-        fi = (
-            "Living Lab (Water)"
-        )
-
-    elif (
-        "industrial water solutions"
-        in lower
-        or "wafer fab"
-        in lower
-    ):
-
-        fi = (
-            "Industrial Water Solutions (IWS)"
-        )
-
-    elif (
-        "municipal water"
-        in lower
-        or "mwtd"
-        in lower
-    ):
-
-        fi = (
-            "Municipal Water: "
-            "Technology Development (MWTD)"
-        )
-
-    elif (
-        "competitive funding for water research"
-        in lower
-    ):
-
-        fi = (
-            "Competitive Funding "
-            "for Water Research"
-        )
-
-    else:
-
-        fi = None
-
-    # --------------------------------------------------------
-    # DOCUMENT TYPE
-    # --------------------------------------------------------
-
-    if (
-        "funding initiative"
-        in lower
-        and
-        "desired outcomes"
-        in lower
-    ):
-
-        document_type = (
-            "FI / programme paper"
-        )
-
-    elif (
-        "project proposal"
-        in lower
-        or
-        "scientific abstract"
-        in lower
-    ):
-
-        document_type = (
-            "Individual R&D proposal"
-        )
-
-    else:
-
-        document_type = (
-            "Unknown"
-        )
-
-    # --------------------------------------------------------
-    # SECTION MAP
-    # --------------------------------------------------------
-
-    section_names = [
-
-        "Scientific Abstract",
-        "Problem Statement",
-        "Research Objectives",
-        "Technical KPIs",
-        "Methodology",
-        "Landscape Scan",
-        "Innovativeness",
-        "Commercialisation",
-        "Milestones",
-        "Budget",
-        "Impact",
-        "TRL",
-
     ]
 
-    sections = []
-
-    for name in section_names:
-
-        if name.lower() in lower:
-
-            sections.append({
-
-                "name":
-                    name,
-
-                "confidence":
-                    0.50,
-
-            })
-
-    # --------------------------------------------------------
-    # CLAIM SIGNALS
-    # --------------------------------------------------------
+    concepts = []
 
     claims = []
 
-    for line in text.splitlines():
+    kpis = []
 
-        line = line.strip()
+    sections = []
 
-        if len(line) < 40:
+    for page in page_analysis:
 
-            continue
+        for concept in page[
+            "concepts"
+        ]:
 
-        if re.search(
+            if concept not in concepts:
+                concepts.append(
+                    concept
+                )
 
-            r"novel|innovative|"
-            r"improv|increase|"
-            r"reduce|demonstrat|"
-            r"achiev|target|"
-            r"performance",
-
-            line,
-
-            re.IGNORECASE,
-
-        ):
+        for claim in page[
+            "claims"
+        ]:
 
             claims.append(
-                line
+                {
+                    "page": page["page"],
+                    "text": claim,
+                }
             )
 
-        if len(claims) >= 12:
+        for kpi in page[
+            "kpis"
+        ]:
 
-            break
+            kpis.append(
+                {
+                    "page": page["page"],
+                    "text": kpi,
+                }
+            )
 
-    # --------------------------------------------------------
-    # QUICK SUMMARY
-    # --------------------------------------------------------
+        for section in page[
+            "sections"
+        ]:
 
-    meaningful = [
-
-        line.strip()
-
-        for line in text.splitlines()
-
-        if len(
-            line.strip()
-        ) > 80
-
-    ]
-
-    summary = None
-
-    if meaningful:
-
-        summary = " ".join(
-            meaningful[:3]
-        )
-
-        if len(summary) > 800:
-
-            summary = (
-                summary[:800]
-                + "..."
+            sections.append(
+                {
+                    "page": page["page"],
+                    "name": section,
+                }
             )
 
     return {
-
         "document": {
-
-            "filename":
-                parsed.get(
-                    "filename"
-                ),
-
-            "title":
-                title,
-
-            "funding_initiative":
-                fi,
-
-            "document_type":
-                document_type,
-
-            "pages":
-                parsed.get(
-                    "pages"
-                ),
-
-            "visual_pages":
-                parsed.get(
-                    "visual_pages",
-                    []
-                ),
-
-            "sections":
-                sections,
-
+            "filename": parsed.get(
+                "filename"
+            ),
+            "title": title,
+            "pages": parsed.get(
+                "page_count"
+            ),
+            "visual_review_pages": [
+                page["page"]
+                for page in page_analysis
+                if page[
+                    "needs_visual_review"
+                ]
+            ],
         },
-
-        "understanding": {
-
-            "problem":
-                None,
-
-            "technology":
-                None,
-
-            "baseline":
-                None,
-
-            "proposed_solution":
-                None,
-
-            "novelty_claims":
-                [],
-
-            "trl_start":
-                None,
-
-            "trl_target":
-                None,
-
-        },
-
-        "claims":
-            claims,
-
-        "kpis":
-            [],
-
-        "summary":
-            summary,
-
-        "raw_text":
-            text,
-
-        "review_flags": [
-
-            {
-
-                "severity":
-                    "Review",
-
-                "title":
-                    "Fast-pass interpretation",
-
-                "detail":
-                    (
-                        "The proposal has been "
-                        "parsed without OCR. "
-                        "Sparse pages are flagged "
-                        "for later visual analysis."
-                    ),
-
-            }
-
-        ],
-
+        "concepts": concepts[:15],
+        "claims": claims[:30],
+        "kpis": kpis[:30],
+        "sections": sections,
+        "page_analysis": page_analysis,
+        "raw_text": text,
     }
