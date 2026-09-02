@@ -1601,3 +1601,48 @@ header h1 {
   }
 
 }
+
+.evidence-group {
+  padding:
+    16px 0;
+
+  border-bottom:
+    1px solid #edf3f6;
+}
+
+
+.evidence-query {
+  display:
+    flex;
+
+  align-items:
+    center;
+
+  gap:
+    8px;
+
+  margin-bottom:
+    8px;
+
+  color:
+    #334155;
+}
+
+
+.evidence-query svg {
+  color:
+    var(--sky-dark);
+}
+
+
+.evidence-query strong {
+  font-size:
+    13px;
+}
+
+
+.evidence-group
+.source-links {
+  padding:
+    5px 0 10px;
+}
