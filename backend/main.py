@@ -10,6 +10,7 @@ from fastapi import (
     HTTPException,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from services.documents import (
     parse_document,
@@ -29,6 +30,10 @@ app = FastAPI(
 )
 
 
+# ------------------------------------------------------------
+# CORS
+# ------------------------------------------------------------
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,21 +43,20 @@ app.add_middleware(
 )
 
 
-# ============================================================
-# HEALTH
-# ============================================================
+# ------------------------------------------------------------
+# HEALTH CHECK
+# ------------------------------------------------------------
 
 @app.get("/api/health")
-async def health():
-
+async def health() -> dict:
     return {
         "status": "ok"
     }
 
 
-# ============================================================
-# PROPOSAL
-# ============================================================
+# ------------------------------------------------------------
+# PROPOSAL ANALYSIS
+# ------------------------------------------------------------
 
 @app.post("/api/proposals/analyze")
 async def analyze_proposal(
@@ -61,8 +65,7 @@ async def analyze_proposal(
 
     filename = (
         file.filename
-        or
-        "proposal"
+        or "proposal"
     )
 
     suffix = (
@@ -84,7 +87,7 @@ async def analyze_proposal(
             status_code=400,
             detail=(
                 "Supported formats: "
-                "PDF, DOCX, TXT, MD"
+                "PDF, DOCX, TXT and MD."
             ),
         )
 
@@ -123,20 +126,29 @@ async def analyze_proposal(
 
         return result
 
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Document processing failed: "
+                f"{error}"
+            ),
+        )
+
     finally:
 
         if path:
 
             try:
                 os.unlink(path)
-
             except OSError:
                 pass
 
 
-# ============================================================
+# ------------------------------------------------------------
 # RESEARCH
-# ============================================================
+# ------------------------------------------------------------
 
 @app.post("/api/research/search")
 async def search_research(
@@ -150,33 +162,38 @@ async def search_research(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Query cannot be empty."
+                "Research query cannot be empty."
             ),
         )
 
-    results = await research_pass(
-        query,
-        year,
-        limit,
-    )
+    try:
 
-    return {
+        results = await research_pass(
+            query=query,
+            year=year,
+            limit=limit,
+        )
 
-        "query":
-            query,
+        return {
+            "query": query,
+            "count": len(results),
+            "results": results,
+        }
 
-        "count":
-            len(results),
+    except Exception as error:
 
-        "results":
-            results,
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Research provider failed: "
+                f"{error}"
+            ),
+        )
 
-    }
 
-
-# ============================================================
-# AWARDS
-# ============================================================
+# ------------------------------------------------------------
+# AWARD COMPARISON
+# ------------------------------------------------------------
 
 @app.post("/api/awards/compare")
 async def award_compare(
@@ -185,12 +202,12 @@ async def award_compare(
 
     proposal = payload.get(
         "proposal",
-        {}
+        {},
     )
 
     awards = payload.get(
         "awards",
-        []
+        [],
     )
 
     results = await compare_awards(
@@ -199,19 +216,14 @@ async def award_compare(
     )
 
     return {
-
-        "count":
-            len(results),
-
-        "results":
-            results,
-
+        "count": len(results),
+        "results": results,
     }
 
 
-# ============================================================
-# SERVE REACT
-# ============================================================
+# ------------------------------------------------------------
+# FRONTEND
+# ------------------------------------------------------------
 
 frontend_dist = (
     Path(__file__)
@@ -224,10 +236,6 @@ frontend_dist = (
 
 
 if frontend_dist.exists():
-
-    from fastapi.staticfiles import (
-        StaticFiles,
-    )
 
     app.mount(
         "/",
