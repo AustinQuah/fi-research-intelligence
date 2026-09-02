@@ -20,8 +20,7 @@ import {
 
 
 const API =
-  import.meta.env.VITE_API_BASE ||
-  "http://localhost:8000/api";
+  "https://fi-research-intelligence-2.onrender.com/api";
 
 
 const NAV_ITEMS = [
