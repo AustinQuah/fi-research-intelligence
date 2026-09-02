@@ -9,26 +9,35 @@ CACHE = {}
 
 async def get_json(
     url: str,
-    retries: int = 4,
 ) -> dict:
 
     if url in CACHE:
-        return CACHE[url]
+
+        return CACHE[
+            url
+        ]
 
     headers = {
-        "Accept": "application/json",
-        "User-Agent": (
-            "FI-Research-Intelligence/0.1"
-        ),
+
+        "Accept":
+            "application/json",
+
+        "User-Agent":
+            "FI-Research-Intelligence/1.0",
+
     }
 
     async with httpx.AsyncClient(
+
         timeout=30,
+
         follow_redirects=True,
+
         headers=headers,
+
     ) as client:
 
-        for attempt in range(retries):
+        for attempt in range(4):
 
             response = await client.get(
                 url
@@ -36,16 +45,25 @@ async def get_json(
 
             if response.status_code == 200:
 
-                data = response.json()
+                data = (
+                    response.json()
+                )
 
-                CACHE[url] = data
+                CACHE[
+                    url
+                ] = data
 
                 return data
 
-            if response.status_code == 429:
+            if (
+                response.status_code
+                == 429
+            ):
 
                 retry_after = (
-                    response.headers.get(
+                    response
+                    .headers
+                    .get(
                         "Retry-After"
                     )
                 )
@@ -53,18 +71,29 @@ async def get_json(
                 try:
 
                     delay = (
-                        float(retry_after)
+
+                        float(
+                            retry_after
+                        )
+
                         if retry_after
+
                         else
-                        1.5 * (
+
+                        1.5
+                        *
+                        (
                             2 ** attempt
                         )
+
                     )
 
                 except ValueError:
 
                     delay = (
-                        1.5 * (
+                        1.5
+                        *
+                        (
                             2 ** attempt
                         )
                     )
@@ -91,13 +120,14 @@ async def research_pass(
     query = query.strip()
 
     if not query:
+
         raise ValueError(
             "Research query cannot be empty."
         )
 
-    # --------------------------------------------------------
-    # OpenAlex
-    # --------------------------------------------------------
+    # ========================================================
+    # OPENALEX
+    # ========================================================
 
     openalex_url = (
 
@@ -164,21 +194,25 @@ async def research_pass(
                     "landing_page_url"
                 )
                 or
-                item.get("doi")
+                item.get(
+                    "doi"
+                )
                 or
-                item.get("id"),
+                item.get(
+                    "id"
+                ),
 
         })
 
-    # Don't immediately hammer another provider.
+    # Courtesy delay.
 
     await asyncio.sleep(
         0.75
     )
 
-    # --------------------------------------------------------
-    # Crossref
-    # --------------------------------------------------------
+    # ========================================================
+    # CROSSREF
+    # ========================================================
 
     crossref_url = (
 
@@ -273,11 +307,12 @@ async def research_pass(
 
         })
 
-    # --------------------------------------------------------
-    # Dedup
-    # --------------------------------------------------------
+    # ========================================================
+    # DEDUPLICATE
+    # ========================================================
 
     unique = []
+
     seen = set()
 
     for item in results:
@@ -310,10 +345,16 @@ async def research_pass(
             or
             key in seen
         ):
+
             continue
 
-        seen.add(key)
-        unique.append(item)
+        seen.add(
+            key
+        )
+
+        unique.append(
+            item
+        )
 
     unique.sort(
 
