@@ -1,21 +1,22 @@
-import React, { useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   Activity,
   ArrowUpRight,
   BookOpen,
   CheckCircle2,
-  ChevronRight,
+  FileSearch,
   FileText,
-  FolderOpen,
+  FlaskConical,
   Gauge,
+  Loader2,
   Search,
   ShieldCheck,
-  Sparkles,
   Upload,
-  Loader2,
-  ExternalLink,
-  SlidersHorizontal,
 } from "lucide-react";
 
 
@@ -23,7 +24,7 @@ const API =
   "https://fi-research-intelligence-2.onrender.com/api";
 
 
-const NAV_ITEMS = [
+const NAVIGATION = [
   {
     id: "overview",
     label: "Overview",
@@ -35,406 +36,308 @@ const NAV_ITEMS = [
     icon: FileText,
   },
   {
-    id: "awards",
-    label: "Awards",
-    icon: FolderOpen,
-  },
-  {
     id: "research",
-    label: "Research & IP",
+    label: "Research",
     icon: BookOpen,
   },
   {
     id: "review",
-    label: "Reviewer",
+    label: "Review",
     icon: ShieldCheck,
   },
 ];
 
 
 export default function App() {
-
   const [
     page,
     setPage,
   ] = useState("overview");
 
-
   const [
-    proposal,
-    setProposal,
+    documentId,
+    setDocumentId,
   ] = useState(null);
 
+  const [
+    dossier,
+    setDossier,
+  ] = useState(null);
 
   const [
     research,
     setResearch,
-  ] = useState([]);
-
-
-  const [
-    awards,
-    setAwards,
-  ] = useState([]);
-
+  ] = useState({
+    status: "not_started",
+    queries: [],
+    evidence: [],
+  });
 
   const [
-    loading,
-    setLoading,
-  ] = useState(false);
-
-
-  const [
-    status,
-    setStatus,
-  ] = useState("Ready");
-
+    uploadStatus,
+    setUploadStatus,
+  ] = useState("idle");
 
   const [
     message,
     setMessage,
   ] = useState("");
 
+  const [
+    researchStarted,
+    setResearchStarted,
+  ] = useState(false);
+
+
+  async function apiRequest(
+    url,
+    options = {},
+  ) {
+    let response;
+
+    try {
+      response = await fetch(
+        url,
+        options,
+      );
+    } catch (error) {
+      throw new Error(
+        "Could not reach the research server. "
+        + "The Render backend may be sleeping "
+        + "or unavailable."
+      );
+    }
+
+    let data = null;
+
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const detail =
+        data?.detail
+        || `Server returned HTTP ${response.status}.`;
+
+      throw new Error(detail);
+    }
+
+    return data;
+  }
+
 
   async function uploadProposal(file) {
-
     if (!file) {
       return;
     }
 
+    setUploadStatus(
+      "uploading"
+    );
 
-    setLoading(true);
+    setMessage(
+      "Uploading proposal..."
+    );
 
-    setStatus("Reading proposal...");
+    setDossier(null);
 
-    setMessage("");
+    setDocumentId(null);
 
+    setResearch({
+      status: "not_started",
+      queries: [],
+      evidence: [],
+    });
+
+    setResearchStarted(false);
+
+    const form =
+      new FormData();
+
+    form.append(
+      "file",
+      file,
+    );
 
     try {
-
-      const body =
-        new FormData();
-
-      body.append(
-        "file",
-        file
-      );
-
-
-      const response =
-        await fetch(
-          `${API}/proposals/analyze`,
+      const result =
+        await apiRequest(
+          `${API}/proposals/upload`,
           {
             method: "POST",
-            body,
-          }
+            body: form,
+          },
         );
 
-
-      const data =
-        await response.json();
-
-
-      if (!response.ok) {
-
-        throw new Error(
-          data.detail ||
-          "Proposal upload failed."
-        );
-
-      }
-
-
-      setProposal(
-        data
+      setDocumentId(
+        result.id
       );
-      
-      setEvidence(
-        data.research?.evidence
-        ||
-        []
+
+      setDossier(
+        result.document
       );
-            
-      setStatus(
-        "Proposal ready"
+
+      setUploadStatus(
+        "ready"
       );
 
       setMessage(
-        "Proposal loaded successfully."
+        "Document analysed."
       );
-
 
       setPage(
-        "overview"
+        "document"
       );
 
-
     } catch (error) {
-
-      setStatus(
-        "Error"
+      setUploadStatus(
+        "error"
       );
 
       setMessage(
         error.message
       );
-
-    } finally {
-
-      setLoading(false);
-
     }
-
   }
 
 
-  async function searchResearch(
-    query
-  ) {
-
-    const cleanQuery =
-      String(query || "").trim();
-
-
-    if (!cleanQuery) {
-
-      setMessage(
-        "Enter a research question or technical claim."
-      );
-
-      return;
-
-    }
-
-
-    setLoading(true);
-
-    setStatus(
-      "Searching literature..."
-    );
-
-    setMessage("");
-
-
-    try {
-
-      const params =
-        new URLSearchParams({
-
-          query:
-            cleanQuery,
-
-          year:
-            "2020",
-
-          limit:
-            "15",
-
-        });
-
-
-      const response =
-        await fetch(
-
-          `${API}/research/search?${params}`,
-
-          {
-            method:
-              "POST",
-          }
-
-        );
-
-
-      const data =
-        await response.json();
-
-
-      if (!response.ok) {
-
-        throw new Error(
-
-          data.detail ||
-          "Research search failed."
-
-        );
-
-      }
-
-
-      setResearch(
-        data.results || []
-      );
-
-
-      setStatus(
-        "Research ready"
-      );
-
-
-      setMessage(
-
-        `${data.count || 0} research records found.`
-
-      );
-
-
-    } catch (error) {
-
-      setStatus(
-        "Search error"
-      );
-
-      setMessage(
-        error.message
-      );
-
-    } finally {
-
-      setLoading(false);
-
-    }
-
-  }
-
-
-  async function uploadAward(file) {
-
-    if (!file) {
+  async function beginResearch() {
+    if (
+      !documentId
+      || researchStarted
+    ) {
       return;
     }
 
-
-    setLoading(true);
-
-    setStatus(
-      "Reading award..."
+    setResearchStarted(
+      true
     );
 
+    setResearch({
+      status: "running",
+      queries: [],
+      evidence: [],
+    });
 
     try {
-
-      const body =
-        new FormData();
-
-      body.append(
-        "file",
-        file
+      await apiRequest(
+        `${API}/proposals/${documentId}/research`,
+        {
+          method: "POST",
+        },
       );
-
-
-      const response =
-        await fetch(
-
-          `${API}/proposals/analyze`,
-
-          {
-            method:
-              "POST",
-            body,
-          }
-
-        );
-
-
-      const data =
-        await response.json();
-
-
-      if (!response.ok) {
-
-        throw new Error(
-
-          data.detail ||
-          "Award upload failed."
-
-        );
-
-      }
-
-
-      setAwards(
-        current => [
-
-          ...current,
-
-          {
-
-            filename:
-              file.name,
-
-            text:
-              data.raw_text ||
-              "",
-
-          },
-
-        ]
-
-      );
-
-
-      setStatus(
-        "Award ready"
-      );
-
-
-      setMessage(
-        `${file.name} added.`
-      );
-
 
     } catch (error) {
-
-      setStatus(
-        "Error"
+      setResearchStarted(
+        false
       );
+
+      setResearch({
+        status: "error",
+        queries: [],
+        evidence: [],
+        error: error.message,
+      });
 
       setMessage(
         error.message
       );
-
-    } finally {
-
-      setLoading(false);
-
     }
-
   }
 
 
-  const currentTitle = useMemo(
+  useEffect(() => {
+    if (
+      dossier
+      && documentId
+      && !researchStarted
+    ) {
+      beginResearch();
+    }
+  }, [
+    dossier,
+    documentId,
+    researchStarted,
+  ]);
 
-    () =>
 
-      proposal?.document?.title ||
-      proposal?.document?.filename ||
-      "No proposal loaded",
+  useEffect(() => {
+    if (
+      !documentId
+      || research.status !== "running"
+    ) {
+      return;
+    }
 
-    [proposal]
+    const timer =
+      window.setInterval(
+        async () => {
+          try {
+            const result =
+              await apiRequest(
+                `${API}/proposals/${documentId}/research`
+              );
 
-  );
+            setResearch(
+              result
+            );
+
+            if (
+              result.status
+              === "complete"
+            ) {
+              setMessage(
+                "Research complete."
+              );
+            }
+
+          } catch (error) {
+            setResearch({
+              status: "error",
+              queries: [],
+              evidence: [],
+              error: error.message,
+            });
+
+            setMessage(
+              error.message
+            );
+          }
+        },
+        2000,
+      );
+
+    return () => {
+      window.clearInterval(
+        timer
+      );
+    };
+
+  }, [
+    documentId,
+    research.status,
+  ]);
+
+
+  const title =
+    dossier?.document?.title
+    || "No proposal loaded";
 
 
   return (
-
     <div className="app">
 
       <aside className="sidebar">
 
         <div className="brand">
 
-          <div className="brand-logo">
-
-            <Activity
-              size={18}
-            />
-
+          <div className="brand-mark">
+            <Activity size={18} />
           </div>
 
-
           <div>
-
             <strong>
               FI Research
             </strong>
@@ -442,95 +345,96 @@ export default function App() {
             <span>
               Intelligence
             </span>
-
           </div>
 
         </div>
 
 
         <nav>
+          {NAVIGATION.map(
+            item => {
+              const Icon =
+                item.icon;
 
-          {NAV_ITEMS.map(
-            item => (
+              return (
+                <button
+                  key={item.id}
+                  className={
+                    page === item.id
+                      ? "nav-item active"
+                      : "nav-item"
+                  }
+                  onClick={() =>
+                    setPage(
+                      item.id
+                    )
+                  }
+                >
+                  <Icon size={17} />
 
-              <NavItem
-
-                key={
-                  item.id
-                }
-
-                active={
-                  page === item.id
-                }
-
-                icon={
-                  <item.icon
-                    size={17}
-                  />
-                }
-
-                label={
-                  item.label
-                }
-
-                onClick={() =>
-                  setPage(
-                    item.id
-                  )
-                }
-
-              />
-
-            )
+                  <span>
+                    {item.label}
+                  </span>
+                </button>
+              );
+            }
           )}
-
         </nav>
 
 
-        <div className="sidebar-status">
-
+        <div className="server-status">
           <CheckCircle2
             size={14}
           />
 
-          System ready
-
+          Render API
         </div>
 
       </aside>
 
 
-      <main>
+      <main className="main">
 
-        <header>
+        <header className="topbar">
 
           <div>
-
             <div className="eyebrow">
               RESEARCH WORKSPACE
             </div>
 
             <h1>
-
               {
-
-                NAV_ITEMS.find(
+                NAVIGATION.find(
                   item =>
                     item.id === page
                 )?.label
-
               }
-
             </h1>
-
           </div>
 
 
-          <div className="online">
+          <div className="status-pill">
 
-            <span />
-
-            {status}
+            {uploadStatus ===
+              "uploading"
+              ? (
+                <>
+                  <Loader2
+                    size={13}
+                    className="spin"
+                  />
+                  Processing
+                </>
+              )
+              : (
+                <>
+                  <span
+                    className="status-dot"
+                  />
+                  Ready
+                </>
+              )
+            }
 
           </div>
 
@@ -538,9 +442,7 @@ export default function App() {
 
 
         {message && (
-
-          <div className="message">
-
+          <div className="toast">
             <span>
               {message}
             </span>
@@ -552,487 +454,1024 @@ export default function App() {
             >
               ×
             </button>
-
           </div>
-
         )}
 
 
         {page === "overview" && (
-
           <Overview
-
-            proposal={
-              proposal
+            dossier={dossier}
+            research={research}
+            uploadStatus={
+              uploadStatus
             }
-
-            awards={
-              awards
-            }
-
-            research={
-              research
-            }
-
-            loading={
-              loading
-            }
-
-            upload={
+            uploadProposal={
               uploadProposal
             }
-
-            navigate={
-              setPage
-            }
-
+            setPage={setPage}
           />
-
         )}
 
 
         {page === "document" && (
-
-          <DocumentView
-            proposal={
-              proposal
-            }
+          <DocumentWorkspace
+            dossier={dossier}
+            setPage={setPage}
           />
-
-        )}
-
-
-        {page === "awards" && (
-
-          <AwardsView
-
-            awards={
-              awards
-            }
-
-            upload={
-              uploadAward
-            }
-
-          />
-
         )}
 
 
         {page === "research" && (
-
-          <ResearchView
-
-            proposal={
-              proposal
-            }
-
-            research={
-              research
-            }
-
-            loading={
-              loading
-            }
-
-            search={
-              searchResearch
-            }
-
+          <ResearchWorkspace
+            dossier={dossier}
+            research={research}
           />
-
         )}
 
 
         {page === "review" && (
-
-          <ReviewView />
-
+          <ReviewWorkspace
+            title={title}
+          />
         )}
 
       </main>
 
     </div>
-
   );
-
-}
-
-
-function NavItem({
-  active,
-  icon,
-  label,
-  onClick,
-}) {
-
-  return (
-
-    <button
-
-      className={
-        active
-          ? "nav active"
-          : "nav"
-      }
-
-      onClick={
-        onClick
-      }
-
-    >
-
-      {icon}
-
-      <span>
-        {label}
-      </span>
-
-
-      {active && (
-
-        <ChevronRight
-          size={14}
-          className="nav-arrow"
-        />
-
-      )}
-
-    </button>
-
-  );
-
 }
 
 
 function Overview({
-  proposal,
-  awards,
+  dossier,
   research,
-  loading,
-  upload,
-  navigate,
+  uploadStatus,
+  uploadProposal,
+  setPage,
 }) {
-
   return (
-
-    <section className="page">
+    <section className="workspace">
 
       <div className="hero">
 
-        <div>
+        <div className="hero-copy">
 
-          <span className="hero-kicker">
+          <span className="hero-label">
             PROPOSAL INTELLIGENCE
           </span>
 
-
           <h2>
-
-            Understand the proposal.
+            Read the proposal.
             <br />
-
-            Find what already exists.
-
+            Investigate the evidence.
           </h2>
 
-
           <p>
-
-            Start with the source document,
-            then move from claims to evidence,
-            research and prior work.
-
+            Upload a technical proposal.
+            The workspace extracts its
+            structure, claims, KPIs and
+            research concepts, then starts
+            looking for related evidence.
           </p>
 
         </div>
 
 
-        <div className="orb">
-
-          <Sparkles
+        <div className="hero-symbol">
+          <FlaskConical
             size={34}
           />
-
         </div>
 
       </div>
 
 
-      <div className="metrics">
+      <div className="stats">
 
-        <Metric
-          label="Proposal"
+        <Stat
+          label="Document"
           value={
-            proposal
+            dossier
               ? "Loaded"
               : "None"
           }
         />
 
-        <Metric
-          label="Awards"
+        <Stat
+          label="Pages"
           value={
-            awards.length
+            dossier
+              ?.document
+              ?.pages
+            ?? "—"
           }
         />
 
-        <Metric
+        <Stat
+          label="Concepts"
+          value={
+            dossier
+              ?.concepts
+              ?.length
+            ?? 0
+          }
+        />
+
+        <Stat
           label="Research"
           value={
-            research.length
-          }
-        />
-
-        <Metric
-          label="Status"
-          value={
-            loading
-              ? "Working"
-              : "Ready"
+            research.status
           }
         />
 
       </div>
 
 
-      <div className="section-title">
+      <div className="section-heading">
 
         <div>
-
           <h3>
-            Start a research workspace
+            Start with a proposal
           </h3>
 
           <p>
-            Upload your source proposal.
+            PDF, DOCX, TXT or Markdown.
           </p>
-
         </div>
 
       </div>
 
 
-      <label className="upload">
+      <label className="upload-zone">
 
         <div className="upload-icon">
 
-          {loading
-
-            ? <Loader2
-                size={20}
+          {uploadStatus ===
+            "uploading"
+            ? (
+              <Loader2
+                size={21}
                 className="spin"
               />
-
-            : <Upload
-                size={20}
+            )
+            : (
+              <Upload
+                size={21}
               />
-
+            )
           }
 
         </div>
 
 
-        <div>
+        <div className="upload-copy">
 
           <strong>
-
             {
-              loading
-                ? "Processing document..."
-                : "Drop a proposal here"
+              uploadStatus ===
+                "uploading"
+                ? "Reading proposal..."
+                : "Choose a proposal"
             }
-
           </strong>
 
-
           <span>
-            PDF, DOCX, TXT or Markdown
+            Native text extraction first.
+            Sparse pages are flagged for
+            visual processing.
           </span>
 
         </div>
 
 
-        <span className="upload-button">
-
+        <span className="primary-button">
           Choose file
-
         </span>
 
 
         <input
-
           type="file"
-
           accept=".pdf,.docx,.txt,.md"
-
           disabled={
-            loading
+            uploadStatus ===
+            "uploading"
           }
-
           onChange={
             event =>
-              upload(
-                event.target.files?.[0]
+              uploadProposal(
+                event
+                  .target
+                  .files?.[0]
               )
           }
-
         />
 
       </label>
 
 
-      {proposal && (
+      {dossier && (
+        <div className="document-summary">
 
-        <div className="proposal-card">
+          <div className="document-summary-main">
 
-          <div className="proposal-head">
-
-            <div>
-
-              <span className="field-label">
-                CURRENT PROPOSAL
-              </span>
-
-              <h3>
-                {
-                  proposal.document?.title
-                  ||
-                  proposal.document?.filename
-                  ||
-                  "Untitled"
-                }
-              </h3>
-
-            </div>
-
-
-            <span className="chip">
-
-              {
-                proposal.document
-                  ?.funding_initiative
-                ||
-                "FI not determined"
-              }
-
+            <span className="eyebrow">
+              CURRENT PROPOSAL
             </span>
 
-          </div>
+            <h3>
+              {
+                dossier
+                  .document
+                  ?.title
+              }
+            </h3>
 
-
-          <div className="proposal-body">
-
-            <div>
-
-              <span className="field-label">
-                SUMMARY
-              </span>
-
-              <p>
-
-                {
-                  proposal.summary
-                  ||
-                  "No summary extracted."
-                }
-
-              </p>
-
-            </div>
-
-
-            <div>
-
-              <span className="field-label">
-                SOURCE
-              </span>
-
-              <p>
-
-                {
-                  proposal.document
-                    ?.document_type
-                  ||
-                  "Unknown"
-                }
-
-              </p>
-
-              <small>
-
-                {
-                  proposal.document
-                    ?.pages
-                  ||
-                  "?"
-                }
-
-                {" pages"}
-
-              </small>
-
-            </div>
+            <p>
+              {
+                dossier
+                  .concepts
+                  ?.slice(0, 6)
+                  .join(" · ")
+                || "No technical concepts detected."
+              }
+            </p>
 
           </div>
 
 
-          <div className="actions">
+          <div className="summary-actions">
 
             <button
               onClick={() =>
-                navigate(
+                setPage(
                   "document"
                 )
               }
             >
-
-              Open document
-
+              Document
               <ArrowUpRight
-                size={15}
+                size={14}
               />
-
             </button>
-
 
             <button
               onClick={() =>
-                navigate(
+                setPage(
                   "research"
                 )
               }
             >
-
-              Investigate
-
+              Research
               <Search
-                size={15}
+                size={14}
               />
-
             </button>
 
           </div>
 
         </div>
-
       )}
 
     </section>
-
   );
-
 }
 
 
-function Metric({
+function DocumentWorkspace({
+  dossier,
+  setPage,
+}) {
+  const [
+    selectedPage,
+    setSelectedPage,
+  ] = useState(1);
+
+
+  if (!dossier) {
+    return (
+      <EmptyState
+        icon={FileText}
+        title="No proposal loaded"
+        text={
+          "Upload a proposal from Overview first."
+        }
+      />
+    );
+  }
+
+
+  if (
+    dossier.status ===
+    "needs_visual_processing"
+  ) {
+    return (
+      <section className="workspace">
+
+        <div className="warning-panel">
+
+          <FileSearch
+            size={24}
+          />
+
+          <div>
+            <h3>
+              Visual processing required
+            </h3>
+
+            <p>
+              This document contains too
+              little native text to analyse
+              reliably. It is probably a
+              scanned or image-based PDF.
+            </p>
+          </div>
+
+        </div>
+
+      </section>
+    );
+  }
+
+
+  const pages =
+    dossier.page_analysis
+    || [];
+
+
+  const currentPage =
+    pages.find(
+      page =>
+        page.page ===
+        selectedPage
+    )
+    || pages[0];
+
+
+  return (
+    <section className="workspace">
+
+      <div className="document-header">
+
+        <div>
+          <span className="eyebrow">
+            PROPOSAL
+          </span>
+
+          <h2>
+            {
+              dossier
+                .document
+                ?.title
+            }
+          </h2>
+        </div>
+
+
+        <button
+          className="research-button"
+          onClick={() =>
+            setPage(
+              "research"
+            )
+          }
+        >
+          Investigate evidence
+          <ArrowUpRight
+            size={14}
+          />
+        </button>
+
+      </div>
+
+
+      <div className="document-layout">
+
+        <aside className="page-list">
+
+          <div className="pane-title">
+            Pages
+          </div>
+
+          {pages.map(
+            page => (
+              <button
+                key={page.page}
+                className={
+                  selectedPage ===
+                    page.page
+                    ? "page-button active"
+                    : "page-button"
+                }
+                onClick={() =>
+                  setSelectedPage(
+                    page.page
+                  )
+                }
+              >
+                <span>
+                  {page.page}
+                </span>
+
+                <small>
+                  {
+                    page.concepts
+                      ?.length
+                    || 0
+                  } concepts
+                </small>
+              </button>
+            )
+          )}
+
+        </aside>
+
+
+        <div className="proposal-pane">
+
+          <div className="pane-title">
+            Page {
+              currentPage?.page
+            }
+          </div>
+
+
+          <div className="proposal-text">
+            {
+              currentPage
+                ?.text_preview
+              || "No native text extracted from this page."
+            }
+          </div>
+
+        </div>
+
+
+        <aside className="analysis-pane">
+
+          <AnalysisSection
+            title="Concepts"
+            items={
+              currentPage
+                ?.concepts
+              || []
+            }
+          />
+
+          <AnalysisSection
+            title="Claims"
+            items={
+              currentPage
+                ?.claims
+              || []
+            }
+          />
+
+          <AnalysisSection
+            title="KPIs"
+            items={
+              currentPage
+                ?.kpis
+              || []
+            }
+          />
+
+        </aside>
+
+      </div>
+
+    </section>
+  );
+}
+
+
+function AnalysisSection({
+  title,
+  items,
+}) {
+  return (
+    <div className="analysis-section">
+
+      <div className="pane-title">
+        {title}
+      </div>
+
+      {!items.length && (
+        <p className="muted">
+          None detected.
+        </p>
+      )}
+
+      {items.map(
+        (item, index) => (
+          <div
+            className="analysis-item"
+            key={index}
+          >
+            {item}
+          </div>
+        )
+      )}
+
+    </div>
+  );
+}
+
+
+function ResearchWorkspace({
+  dossier,
+  research,
+}) {
+  const evidence =
+    research.evidence
+    || [];
+
+
+  if (!dossier) {
+    return (
+      <EmptyState
+        icon={BookOpen}
+        title="No research context"
+        text={
+          "Upload a proposal first. Research will start automatically."
+        }
+      />
+    );
+  }
+
+
+  return (
+    <section className="workspace">
+
+      <div className="research-header">
+
+        <div>
+          <span className="eyebrow">
+            EVIDENCE
+          </span>
+
+          <h2>
+            Research generated from
+            the proposal
+          </h2>
+
+          <p>
+            Queries come from the
+            technical concepts and claims
+            extracted from your document.
+          </p>
+        </div>
+
+
+        <ResearchStatus
+          status={
+            research.status
+          }
+        />
+
+      </div>
+
+
+      {research.status ===
+        "running" && (
+        <div className="progress-panel">
+
+          <Loader2
+            className="spin"
+            size={18}
+          />
+
+          <div>
+            <strong>
+              Searching literature
+            </strong>
+
+            <span>
+              The proposal remains usable
+              while research runs.
+            </span>
+          </div>
+
+        </div>
+      )}
+
+
+      {research.status ===
+        "error" && (
+        <div className="warning-panel">
+
+          <FileSearch
+            size={20}
+          />
+
+          <div>
+            <strong>
+              Research provider error
+            </strong>
+
+            <p>
+              {
+                research.error
+                || "Research failed."
+              }
+            </p>
+          </div>
+
+        </div>
+      )}
+
+
+      {research.status ===
+        "complete"
+        && evidence.length === 0
+        && (
+          <div className="empty-inline">
+            No relevant evidence was
+            returned.
+          </div>
+        )
+      }
+
+
+      <div className="evidence-list">
+
+        {evidence.map(
+          (
+            group,
+            groupIndex
+          ) => (
+            <EvidenceGroup
+              key={
+                groupIndex
+              }
+              group={group}
+            />
+          )
+        )}
+
+      </div>
+
+    </section>
+  );
+}
+
+
+function EvidenceGroup({
+  group,
+}) {
+  const [
+    open,
+    setOpen,
+  ] = useState(true);
+
+
+  return (
+    <article className="evidence-group">
+
+      <button
+        className="evidence-heading"
+        onClick={() =>
+          setOpen(
+            current =>
+              !current
+          )
+        }
+      >
+
+        <div>
+          <span className="eyebrow">
+            SEARCH QUERY
+          </span>
+
+          <strong>
+            {group.query}
+          </strong>
+        </div>
+
+        <span>
+          {
+            group.papers
+              ?.length
+            || 0
+          } results
+        </span>
+
+      </button>
+
+
+      {open && (
+        <div className="evidence-body">
+
+          <div className="source-links">
+
+            <ExternalSource
+              label="Google Scholar"
+              href={
+                group.links
+                  ?.google_scholar
+              }
+            />
+
+            <ExternalSource
+              label="Google Patents"
+              href={
+                group.links
+                  ?.google_patents
+              }
+            />
+
+            <ExternalSource
+              label="Semantic Scholar"
+              href={
+                group.links
+                  ?.semantic_scholar
+              }
+            />
+
+            <ExternalSource
+              label="WIPO"
+              href={
+                group.links
+                  ?.wipo
+              }
+            />
+
+          </div>
+
+
+          {(
+            group.papers
+            || []
+          ).map(
+            (
+              paper,
+              index
+            ) => (
+              <a
+                className="paper"
+                href={
+                  paper.url
+                  || "#"
+                }
+                target="_blank"
+                rel="noreferrer"
+                key={index}
+              >
+
+                <div className="paper-meta">
+
+                  <span>
+                    {
+                      paper.source
+                    }
+                  </span>
+
+                  <span>
+                    {
+                      paper.year
+                      || "—"
+                    }
+                  </span>
+
+                  <span>
+                    {
+                      paper.citations
+                      || 0
+                    } citations
+                  </span>
+
+                </div>
+
+
+                <strong>
+                  {
+                    paper.title
+                  }
+                </strong>
+
+
+                <ArrowUpRight
+                  size={15}
+                />
+
+              </a>
+            )
+          )}
+
+        </div>
+      )}
+
+    </article>
+  );
+}
+
+
+function ExternalSource({
+  label,
+  href,
+}) {
+  if (!href) {
+    return null;
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {label}
+      <ArrowUpRight
+        size={12}
+      />
+    </a>
+  );
+}
+
+
+function ResearchStatus({
+  status,
+}) {
+  return (
+    <div
+      className={
+        `research-status ${status}`
+      }
+    >
+      {status === "running" && (
+        <Loader2
+          size={13}
+          className="spin"
+        />
+      )}
+
+      {status}
+    </div>
+  );
+}
+
+
+function ReviewWorkspace({
+  title,
+}) {
+  const criteria = [
+    "Science & technology",
+    "Impact / national benefit",
+    "Management & delivery",
+    "Budget / value",
+  ];
+
+
+  const initial =
+    Object.fromEntries(
+      criteria.map(
+        criterion => [
+          criterion,
+          3,
+        ]
+      )
+    );
+
+
+  const [
+    scores,
+    setScores,
+  ] = useState(
+    initial
+  );
+
+
+  const average =
+    useMemo(
+      () => {
+        const values =
+          Object.values(
+            scores
+          );
+
+        return (
+          values.reduce(
+            (
+              sum,
+              value
+            ) =>
+              sum
+              + Number(value),
+            0,
+          )
+          / values.length
+        );
+      },
+      [scores],
+    );
+
+
+  return (
+    <section className="workspace">
+
+      <div className="review-header">
+
+        <span className="eyebrow">
+          HUMAN REVIEW
+        </span>
+
+        <h2>
+          {title}
+        </h2>
+
+        <p>
+          Decision-support workspace.
+          Final assessment remains with
+          the human reviewer.
+        </p>
+
+      </div>
+
+
+      <div className="review-grid">
+
+        {criteria.map(
+          criterion => (
+            <div
+              className="review-item"
+              key={criterion}
+            >
+
+              <div>
+                <strong>
+                  {criterion}
+                </strong>
+
+                <span>
+                  {
+                    scores[
+                      criterion
+                    ]
+                  } / 5
+                </span>
+              </div>
+
+
+              <input
+                type="range"
+                min="1"
+                max="5"
+                step="1"
+                value={
+                  scores[
+                    criterion
+                  ]
+                }
+                onChange={
+                  event =>
+                    setScores({
+                      ...scores,
+                      [criterion]:
+                        Number(
+                          event
+                            .target
+                            .value
+                        ),
+                    })
+                }
+              />
+
+            </div>
+          )
+        )}
+
+      </div>
+
+
+      <div className="overall-score">
+
+        <span>
+          Preliminary score
+        </span>
+
+        <strong>
+          {
+            average.toFixed(
+              2
+            )
+          }
+          <small>
+            / 5
+          </small>
+        </strong>
+
+      </div>
+
+    </section>
+  );
+}
+
+
+function Stat({
   label,
   value,
 }) {
-
   return (
-
-    <div className="metric">
+    <div className="stat">
 
       <span>
         {label}
@@ -1043,927 +1482,21 @@ function Metric({
       </strong>
 
     </div>
-
   );
-
 }
 
 
-function DocumentView({
-  proposal
-}) {
-
-  if (!proposal) {
-
-    return (
-
-      <Empty
-
-        title="No proposal loaded"
-
-        text="Upload a proposal from the Overview page."
-
-      />
-
-    );
-
-  }
-
-
-  const understanding =
-    proposal.understanding ||
-    {};
-
-
-  return (
-
-    <section className="page">
-
-      <div className="section-title">
-
-        <div>
-
-          <h3>
-            Document understanding
-          </h3>
-
-          <p>
-            Native extraction first.
-            Semantic analysis can follow.
-          </p>
-
-        </div>
-
-      </div>
-
-
-      <div className="info-grid">
-
-        {[
-
-          ["Problem", "problem"],
-
-          ["Technology", "technology"],
-
-          ["Baseline", "baseline"],
-
-          [
-            "Proposed solution",
-            "proposed_solution",
-          ],
-
-        ].map(
-          ([label, key]) => (
-
-            <div
-              className="info-card"
-              key={
-                label
-              }
-            >
-
-              <span className="field-label">
-                {label}
-              </span>
-
-              <p>
-
-                {
-                  understanding[key]
-                  ||
-                  "Not determined"
-                }
-
-              </p>
-
-            </div>
-
-          )
-        )}
-
-      </div>
-
-
-      <div className="panel">
-
-        <div className="panel-head">
-
-          <div>
-
-            <h3>
-              Document map
-            </h3>
-
-            <p>
-              Detected structural sections.
-            </p>
-
-          </div>
-
-
-          <span className="chip">
-
-            {
-              proposal.document
-                ?.sections
-                ?.length
-              ||
-              0
-            }
-
-            {" sections"}
-
-          </span>
-
-        </div>
-
-
-        {(
-          proposal.document
-            ?.sections
-          ||
-          []
-        ).map(
-          section => (
-
-            <div
-              className="row-line"
-              key={
-                section.name
-              }
-            >
-
-              <span>
-                {section.name}
-              </span>
-
-              <strong>
-
-                {
-                  Math.round(
-                    (
-                      section.confidence
-                      ||
-                      0
-                    )
-                    *
-                    100
-                  )
-                }%
-
-              </strong>
-
-            </div>
-
-          )
-        )}
-
-      </div>
-
-
-      <div className="panel">
-
-        <div className="panel-head">
-
-          <div>
-
-            <h3>
-              Potential technical claims
-            </h3>
-
-            <p>
-              Signals detected from source text.
-            </p>
-
-          </div>
-
-
-          <SlidersHorizontal
-            size={17}
-            color="#94a3b8"
-          />
-
-        </div>
-
-
-        {(
-          proposal.claims
-          ||
-          []
-        ).map(
-          (
-            claim,
-            index
-          ) => (
-
-            <div
-              className="claim"
-              key={
-                index
-              }
-            >
-
-              <span>
-
-                {
-                  index + 1
-                }
-
-              </span>
-
-
-              <p>
-                {claim}
-              </p>
-
-            </div>
-
-          )
-        )}
-
-      </div>
-
-    </section>
-
-  );
-
-}
-
-
-function AwardsView({
-  awards,
-  upload
-}) {
-
-  return (
-
-    <section className="page">
-
-      <div className="section-title">
-
-        <div>
-
-          <h3>
-            Award landscape
-          </h3>
-
-          <p>
-            Build a corpus of previous work.
-          </p>
-
-        </div>
-
-      </div>
-
-
-      <label className="upload">
-
-        <div className="upload-icon">
-
-          <Upload
-            size={20}
-          />
-
-        </div>
-
-
-        <div>
-
-          <strong>
-            Add previous award
-          </strong>
-
-          <span>
-            PDF, DOCX, TXT or Markdown
-          </span>
-
-        </div>
-
-
-        <span className="upload-button">
-          Choose file
-        </span>
-
-
-        <input
-
-          type="file"
-
-          accept=".pdf,.docx,.txt,.md"
-
-          onChange={
-            event =>
-              upload(
-                event.target.files?.[0]
-              )
-          }
-
-        />
-
-      </label>
-
-
-      <div className="panel">
-
-        <div className="panel-head">
-
-          <div>
-
-            <h3>
-              Award corpus
-            </h3>
-
-            <p>
-              Documents currently loaded.
-            </p>
-
-          </div>
-
-
-          <span className="chip">
-
-            {
-              awards.length
-            }
-
-          </span>
-
-        </div>
-
-
-        {!awards.length && (
-
-          <div className="empty-row">
-
-            No previous awards loaded.
-
-          </div>
-
-        )}
-
-
-        {awards.map(
-          (
-            award,
-            index
-          ) => (
-
-            <div
-              className="file-row"
-              key={
-                index
-              }
-            >
-
-              <FileText
-                size={16}
-              />
-
-              <span>
-
-                {
-                  award.filename
-                }
-
-              </span>
-
-            </div>
-
-          )
-        )}
-
-      </div>
-
-    </section>
-
-  );
-
-}
-
-
-function ResearchView({
-  proposal,
-  research,
-  loading,
-  search
-}) {
-
-  const defaultQuery =
-    proposal
-      ?.document
-      ?.title
-    ||
-    "";
-
-
-  const [
-    query,
-    setQuery
-  ] = useState(
-    defaultQuery
-  );
-
-
-  const encodedQuery =
-    encodeURIComponent(
-      query ||
-      "water technology"
-    );
-
-
-  return (
-
-    <section className="page">
-
-      <div className="section-title">
-
-        <div>
-
-          <h3>
-            Research & IP
-          </h3>
-
-          <p>
-            Search literature and jump
-            directly into patent sources.
-          </p>
-
-        </div>
-
-      </div>
-
-
-      <div className="search">
-
-        <Search
-          size={18}
-        />
-
-
-        <input
-
-          value={
-            query
-          }
-
-          onChange={
-            event =>
-              setQuery(
-                event.target.value
-              )
-          }
-
-          onKeyDown={
-            event => {
-
-              if (
-                event.key === "Enter"
-              ) {
-
-                search(
-                  query
-                );
-
-              }
-
-            }
-          }
-
-          placeholder={
-            "Technology, claim or research question"
-          }
-
-        />
-
-
-        <button
-
-          onClick={() =>
-            search(
-              query
-            )
-          }
-
-          disabled={
-            loading
-          }
-
-        >
-
-          {loading
-            ? <Loader2
-                size={16}
-                className="spin"
-              />
-            : <Search
-                size={16}
-              />
-          }
-
-          Search
-
-        </button>
-
-      </div>
-
-
-      <div className="source-links">
-
-        <SourceLink
-
-          name="Google Scholar"
-
-          url={
-            `https://scholar.google.com/scholar?q=${encodedQuery}`
-          }
-
-        />
-
-
-        <SourceLink
-
-          name="Google Patents"
-
-          url={
-            `https://patents.google.com/?q=${encodedQuery}`
-          }
-
-        />
-
-
-        <SourceLink
-
-          name="Semantic Scholar"
-
-          url={
-            `https://www.semanticscholar.org/search?q=${encodedQuery}`
-          }
-
-        />
-
-
-        <SourceLink
-
-          name="WIPO PATENTSCOPE"
-
-          url={
-            `https://patentscope.wipo.int/search/en/result.jsf?query=${encodedQuery}`
-          }
-
-        />
-
-      </div>
-
-
-      <div className="panel">
-
-        <div className="panel-head">
-
-          <div>
-
-            <h3>
-              Literature
-            </h3>
-
-            <p>
-              OpenAlex + Crossref
-            </p>
-
-          </div>
-
-
-          <span className="chip">
-
-            {
-              research.length
-            }
-
-          </span>
-
-        </div>
-
-
-        {!research.length && (
-
-          <div className="empty-row">
-
-            Run a search to populate the evidence set.
-
-          </div>
-
-        )}
-
-
-        {research.map(
-          (
-            item,
-            index
-          ) => (
-
-            <div
-              className="research-item"
-              key={
-                index
-              }
-            >
-
-              <div>
-
-                <span className="research-source">
-                  {item.source}
-                </span>
-
-                <span className="muted">
-
-                  {" "}
-                  {item.year || ""}
-                  {" · "}
-                  {item.citations || 0}
-                  {" citations"}
-
-                </span>
-
-              </div>
-
-
-              <a
-
-                href={
-                  item.url
-                  ||
-                  "#"
-                }
-
-                target="_blank"
-
-                rel="noreferrer"
-
-              >
-
-                {item.title}
-
-                <ExternalLink
-                  size={13}
-                />
-
-              </a>
-
-            </div>
-
-          )
-        )}
-
-      </div>
-
-    </section>
-
-  );
-
-}
-
-
-function SourceLink({
-  name,
-  url
-}) {
-
-  return (
-
-    <a
-
-      href={
-        url
-      }
-
-      target="_blank"
-
-      rel="noreferrer"
-
-    >
-
-      {name}
-
-      <ArrowUpRight
-        size={13}
-      />
-
-    </a>
-
-  );
-
-}
-
-
-function ReviewView() {
-
-  const criteria = [
-
-    "Science & technology",
-
-    "Impact / national benefit",
-
-    "Management & delivery",
-
-    "Budget / value",
-
-  ];
-
-
-  const [
-    scores,
-    setScores
-  ] = useState(
-
-    Object.fromEntries(
-
-      criteria.map(
-        criterion => [
-          criterion,
-          4
-        ]
-      )
-
-    )
-
-  );
-
-
-  const average =
-
-    Object.values(
-      scores
-    ).reduce(
-
-      (
-        total,
-        value
-      ) =>
-
-        total +
-        Number(
-          value
-        ),
-
-      0
-
-    )
-
-    /
-
-    criteria.length;
-
-
-  return (
-
-    <section className="page">
-
-      <div className="section-title">
-
-        <div>
-
-          <h3>
-            Human reviewer
-          </h3>
-
-          <p>
-            Structured scoring workspace.
-          </p>
-
-        </div>
-
-      </div>
-
-
-      <div className="review-grid">
-
-        {criteria.map(
-          criterion => (
-
-            <div
-              className="review-card"
-              key={
-                criterion
-              }
-            >
-
-              <span className="field-label">
-                {criterion}
-              </span>
-
-
-              <div className="slider">
-
-                <input
-
-                  type="range"
-
-                  min="1"
-
-                  max="5"
-
-                  step="1"
-
-                  value={
-                    scores[
-                      criterion
-                    ]
-                  }
-
-                  onChange={
-                    event =>
-
-                      setScores({
-
-                        ...scores,
-
-                        [criterion]:
-                          event.target.value,
-
-                      })
-
-                  }
-
-                />
-
-
-                <strong>
-
-                  {
-                    scores[
-                      criterion
-                    ]
-                  }
-
-                  /5
-
-                </strong>
-
-              </div>
-
-            </div>
-
-          )
-        )}
-
-      </div>
-
-
-      <div className="score">
-
-        <span className="field-label">
-          PRELIMINARY SCORE
-        </span>
-
-
-        <strong>
-
-          {
-            average.toFixed(
-              2
-            )
-          }
-
-          <small>
-            /5
-          </small>
-
-        </strong>
-
-
-        <div className="score-bar">
-
-          <span
-            style={{
-              width:
-                `${(average / 5) * 100}%`
-            }}
-          />
-
-        </div>
-
-      </div>
-
-    </section>
-
-  );
-
-}
-
-
-function Empty({
+function EmptyState({
+  icon: Icon,
   title,
-  text
+  text,
 }) {
-
   return (
+    <section className="workspace">
 
-    <section className="page">
+      <div className="empty-state">
 
-      <div className="empty">
-
-        <FileText
-          size={30}
-        />
+        <Icon size={28} />
 
         <h3>
           {title}
@@ -1976,7 +1509,5 @@ function Empty({
       </div>
 
     </section>
-
   );
-
 }
