@@ -1,9 +1,6 @@
-import React, {
-  useState
-} from "react";
+import React, { useMemo, useState } from "react";
 
 import {
-
   Activity,
   ArrowUpRight,
   BookOpen,
@@ -16,99 +13,122 @@ import {
   ShieldCheck,
   Sparkles,
   Upload,
-  Loader2
-
+  Loader2,
+  ExternalLink,
+  SlidersHorizontal,
 } from "lucide-react";
 
 
-const API = "/api";
+const API =
+  import.meta.env.VITE_API_BASE ||
+  "http://localhost:8000/api";
 
 
-function App() {
+const NAV_ITEMS = [
+  {
+    id: "overview",
+    label: "Overview",
+    icon: Gauge,
+  },
+  {
+    id: "document",
+    label: "Document",
+    icon: FileText,
+  },
+  {
+    id: "awards",
+    label: "Awards",
+    icon: FolderOpen,
+  },
+  {
+    id: "research",
+    label: "Research & IP",
+    icon: BookOpen,
+  },
+  {
+    id: "review",
+    label: "Reviewer",
+    icon: ShieldCheck,
+  },
+];
+
+
+export default function App() {
 
   const [
-    tab,
-    setTab
-  ] = useState(
-    "overview"
-  );
+    page,
+    setPage,
+  ] = useState("overview");
+
 
   const [
     proposal,
-    setProposal
-  ] = useState(
-    null
-  );
+    setProposal,
+  ] = useState(null);
 
-  const [
-    awards,
-    setAwards
-  ] = useState(
-    []
-  );
 
   const [
     research,
-    setResearch
-  ] = useState(
-    []
-  );
+    setResearch,
+  ] = useState([]);
+
 
   const [
-    busy,
-    setBusy
-  ] = useState(
-    false
-  );
+    awards,
+    setAwards,
+  ] = useState([]);
+
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(false);
+
+
+  const [
+    status,
+    setStatus,
+  ] = useState("Ready");
+
 
   const [
     message,
-    setMessage
-  ] = useState(
-    ""
-  );
+    setMessage,
+  ] = useState("");
 
 
-  async function uploadProposal(
-    file
-  ) {
+  async function uploadProposal(file) {
 
     if (!file) {
       return;
     }
 
-    setBusy(true);
 
-    setMessage(
-      "Reading proposal..."
-    );
+    setLoading(true);
 
-    const form =
-      new FormData();
+    setStatus("Reading proposal...");
 
-    form.append(
-      "file",
-      file
-    );
+    setMessage("");
 
 
     try {
 
+      const body =
+        new FormData();
+
+      body.append(
+        "file",
+        file
+      );
+
+
       const response =
         await fetch(
-
           `${API}/proposals/analyze`,
-
           {
-
-            method:
-              "POST",
-
-            body:
-              form,
-
+            method: "POST",
+            body,
           }
-
         );
 
 
@@ -119,32 +139,34 @@ function App() {
       if (!response.ok) {
 
         throw new Error(
-
-          data.detail
-          ||
-          "Upload failed."
-
+          data.detail ||
+          "Proposal upload failed."
         );
 
       }
 
 
-      setProposal(
-        data
-      );
+      setProposal(data);
 
+      setStatus(
+        "Proposal ready"
+      );
 
       setMessage(
-        "Proposal loaded."
+        "Proposal loaded successfully."
       );
 
 
-      setTab(
+      setPage(
         "overview"
       );
 
 
     } catch (error) {
+
+      setStatus(
+        "Error"
+      );
 
       setMessage(
         error.message
@@ -152,9 +174,7 @@ function App() {
 
     } finally {
 
-      setBusy(
-        false
-      );
+      setLoading(false);
 
     }
 
@@ -165,10 +185,14 @@ function App() {
     query
   ) {
 
-    if (!query.trim()) {
+    const cleanQuery =
+      String(query || "").trim();
+
+
+    if (!cleanQuery) {
 
       setMessage(
-        "Enter a research question."
+        "Enter a research question or technical claim."
       );
 
       return;
@@ -176,11 +200,13 @@ function App() {
     }
 
 
-    setBusy(true);
+    setLoading(true);
 
-    setMessage(
-      "Searching research..."
+    setStatus(
+      "Searching literature..."
     );
+
+    setMessage("");
 
 
     try {
@@ -188,13 +214,14 @@ function App() {
       const params =
         new URLSearchParams({
 
-          query,
+          query:
+            cleanQuery,
 
           year:
             "2020",
 
           limit:
-            "10",
+            "15",
 
         });
 
@@ -220,8 +247,7 @@ function App() {
 
         throw new Error(
 
-          data.detail
-          ||
+          data.detail ||
           "Research search failed."
 
         );
@@ -230,20 +256,27 @@ function App() {
 
 
       setResearch(
-        data.results
-        ||
-        []
+        data.results || []
+      );
+
+
+      setStatus(
+        "Research ready"
       );
 
 
       setMessage(
 
-        `Found ${data.count || 0} records.`
+        `${data.count || 0} research records found.`
 
       );
 
 
     } catch (error) {
+
+      setStatus(
+        "Search error"
+      );
 
       setMessage(
         error.message
@@ -251,40 +284,37 @@ function App() {
 
     } finally {
 
-      setBusy(
-        false
-      );
+      setLoading(false);
 
     }
 
   }
 
 
-  async function uploadAward(
-    file
-  ) {
+  async function uploadAward(file) {
 
     if (!file) {
       return;
     }
 
-    setBusy(true);
 
-    setMessage(
+    setLoading(true);
+
+    setStatus(
       "Reading award..."
     );
 
 
-    const form =
-      new FormData();
-
-    form.append(
-      "file",
-      file
-    );
-
-
     try {
+
+      const body =
+        new FormData();
+
+      body.append(
+        "file",
+        file
+      );
+
 
       const response =
         await fetch(
@@ -292,13 +322,9 @@ function App() {
           `${API}/proposals/analyze`,
 
           {
-
             method:
               "POST",
-
-            body:
-              form,
-
+            body,
           }
 
         );
@@ -312,8 +338,7 @@ function App() {
 
         throw new Error(
 
-          data.detail
-          ||
+          data.detail ||
           "Award upload failed."
 
         );
@@ -322,9 +347,9 @@ function App() {
 
 
       setAwards(
-        previous => [
+        current => [
 
-          ...previous,
+          ...current,
 
           {
 
@@ -332,14 +357,18 @@ function App() {
               file.name,
 
             text:
-              data.raw_text
-              ||
+              data.raw_text ||
               "",
 
           },
 
         ]
 
+      );
+
+
+      setStatus(
+        "Award ready"
       );
 
 
@@ -350,19 +379,34 @@ function App() {
 
     } catch (error) {
 
+      setStatus(
+        "Error"
+      );
+
       setMessage(
         error.message
       );
 
     } finally {
 
-      setBusy(
-        false
-      );
+      setLoading(false);
 
     }
 
   }
+
+
+  const currentTitle = useMemo(
+
+    () =>
+
+      proposal?.document?.title ||
+      proposal?.document?.filename ||
+      "No proposal loaded",
+
+    [proposal]
+
+  );
 
 
   return (
@@ -399,74 +443,39 @@ function App() {
 
         <nav>
 
-          <Nav
-            active={
-              tab === "overview"
-            }
-            icon={
-              <Gauge size={17} />
-            }
-            label="Overview"
-            onClick={() =>
-              setTab("overview")
-            }
-          />
+          {NAV_ITEMS.map(
+            item => (
 
+              <NavItem
 
-          <Nav
-            active={
-              tab === "document"
-            }
-            icon={
-              <FileText size={17} />
-            }
-            label="Document"
-            onClick={() =>
-              setTab("document")
-            }
-          />
+                key={
+                  item.id
+                }
 
+                active={
+                  page === item.id
+                }
 
-          <Nav
-            active={
-              tab === "awards"
-            }
-            icon={
-              <FolderOpen size={17} />
-            }
-            label="Awards"
-            onClick={() =>
-              setTab("awards")
-            }
-          />
+                icon={
+                  <item.icon
+                    size={17}
+                  />
+                }
 
+                label={
+                  item.label
+                }
 
-          <Nav
-            active={
-              tab === "research"
-            }
-            icon={
-              <BookOpen size={17} />
-            }
-            label="Research & IP"
-            onClick={() =>
-              setTab("research")
-            }
-          />
+                onClick={() =>
+                  setPage(
+                    item.id
+                  )
+                }
 
+              />
 
-          <Nav
-            active={
-              tab === "review"
-            }
-            icon={
-              <ShieldCheck size={17} />
-            }
-            label="Reviewer"
-            onClick={() =>
-              setTab("review")
-            }
-          />
+            )
+          )}
 
         </nav>
 
@@ -497,24 +506,12 @@ function App() {
             <h1>
 
               {
-                {
 
-                  overview:
-                    "Research with context.",
+                NAV_ITEMS.find(
+                  item =>
+                    item.id === page
+                )?.label
 
-                  document:
-                    "Document understanding",
-
-                  awards:
-                    "Award landscape",
-
-                  research:
-                    "Research & IP",
-
-                  review:
-                    "Human reviewer",
-
-                }[tab]
               }
 
             </h1>
@@ -526,7 +523,7 @@ function App() {
 
             <span />
 
-            Online
+            {status}
 
           </div>
 
@@ -537,7 +534,9 @@ function App() {
 
           <div className="message">
 
-            {message}
+            <span>
+              {message}
+            </span>
 
             <button
               onClick={() =>
@@ -552,9 +551,10 @@ function App() {
         )}
 
 
-        {tab === "overview" && (
+        {page === "overview" && (
 
           <Overview
+
             proposal={
               proposal
             }
@@ -567,16 +567,16 @@ function App() {
               research
             }
 
-            busy={
-              busy
+            loading={
+              loading
             }
 
             upload={
               uploadProposal
             }
 
-            goTo={
-              setTab
+            navigate={
+              setPage
             }
 
           />
@@ -584,7 +584,7 @@ function App() {
         )}
 
 
-        {tab === "document" && (
+        {page === "document" && (
 
           <DocumentView
             proposal={
@@ -595,9 +595,10 @@ function App() {
         )}
 
 
-        {tab === "awards" && (
+        {page === "awards" && (
 
           <AwardsView
+
             awards={
               awards
             }
@@ -611,9 +612,10 @@ function App() {
         )}
 
 
-        {tab === "research" && (
+        {page === "research" && (
 
           <ResearchView
+
             proposal={
               proposal
             }
@@ -622,8 +624,8 @@ function App() {
               research
             }
 
-            busy={
-              busy
+            loading={
+              loading
             }
 
             search={
@@ -635,7 +637,7 @@ function App() {
         )}
 
 
-        {tab === "review" && (
+        {page === "review" && (
 
           <ReviewView />
 
@@ -650,11 +652,11 @@ function App() {
 }
 
 
-function Nav({
+function NavItem({
   active,
   icon,
   label,
-  onClick
+  onClick,
 }) {
 
   return (
@@ -679,10 +681,12 @@ function Nav({
         {label}
       </span>
 
+
       {active && (
 
         <ChevronRight
           size={14}
+          className="nav-arrow"
         />
 
       )}
@@ -695,19 +699,12 @@ function Nav({
 
 
 function Overview({
-
   proposal,
-
   awards,
-
   research,
-
-  busy,
-
+  loading,
   upload,
-
-  goTo,
-
+  navigate,
 }) {
 
   return (
@@ -722,21 +719,22 @@ function Overview({
             PROPOSAL INTELLIGENCE
           </span>
 
+
           <h2>
 
             Understand the proposal.
             <br />
 
-            Then find what already exists.
+            Find what already exists.
 
           </h2>
 
+
           <p>
 
-            Turn a technical proposal
-            into structured evidence,
-            research leads and
-            reviewer questions.
+            Start with the source document,
+            then move from claims to evidence,
+            research and prior work.
 
           </p>
 
@@ -745,7 +743,9 @@ function Overview({
 
         <div className="orb">
 
-          <Sparkles />
+          <Sparkles
+            size={34}
+          />
 
         </div>
 
@@ -780,8 +780,8 @@ function Overview({
         <Metric
           label="Status"
           value={
-            busy
-              ? "Processing"
+            loading
+              ? "Working"
               : "Ready"
           }
         />
@@ -794,11 +794,11 @@ function Overview({
         <div>
 
           <h3>
-            Start with your proposal
+            Start a research workspace
           </h3>
 
           <p>
-            Upload the source document.
+            Upload your source proposal.
           </p>
 
         </div>
@@ -810,11 +810,11 @@ function Overview({
 
         <div className="upload-icon">
 
-          {busy
+          {loading
 
             ? <Loader2
-                className="spin"
                 size={20}
+                className="spin"
               />
 
             : <Upload
@@ -830,15 +830,14 @@ function Overview({
 
           <strong>
 
-            {busy
-
-              ? "Reading document..."
-
-              : "Drop a proposal here"
-
+            {
+              loading
+                ? "Processing document..."
+                : "Drop a proposal here"
             }
 
           </strong>
+
 
           <span>
             PDF, DOCX, TXT or Markdown
@@ -849,9 +848,7 @@ function Overview({
 
         <span className="upload-button">
 
-          {busy
-            ? "Processing"
-            : "Choose file"}
+          Choose file
 
         </span>
 
@@ -863,13 +860,13 @@ function Overview({
           accept=".pdf,.docx,.txt,.md"
 
           disabled={
-            busy
+            loading
           }
 
           onChange={
-            e =>
+            event =>
               upload(
-                e.target.files?.[0]
+                event.target.files?.[0]
               )
           }
 
@@ -891,13 +888,13 @@ function Overview({
               </span>
 
               <h3>
-
-                {proposal.document?.title
+                {
+                  proposal.document?.title
                   ||
                   proposal.document?.filename
                   ||
-                  "Untitled"}
-
+                  "Untitled"
+                }
               </h3>
 
             </div>
@@ -930,7 +927,7 @@ function Overview({
                 {
                   proposal.summary
                   ||
-                  "No fast-pass summary extracted."
+                  "No summary extracted."
                 }
 
               </p>
@@ -941,7 +938,7 @@ function Overview({
             <div>
 
               <span className="field-label">
-                DOCUMENT
+                SOURCE
               </span>
 
               <p>
@@ -977,7 +974,9 @@ function Overview({
 
             <button
               onClick={() =>
-                goTo("document")
+                navigate(
+                  "document"
+                )
               }
             >
 
@@ -992,11 +991,13 @@ function Overview({
 
             <button
               onClick={() =>
-                goTo("research")
+                navigate(
+                  "research"
+                )
               }
             >
 
-              Search research
+              Investigate
 
               <Search
                 size={15}
@@ -1019,7 +1020,7 @@ function Overview({
 
 function Metric({
   label,
-  value
+  value,
 }) {
 
   return (
@@ -1050,8 +1051,11 @@ function DocumentView({
     return (
 
       <Empty
+
         title="No proposal loaded"
-        text="Upload a proposal from Overview first."
+
+        text="Upload a proposal from the Overview page."
+
       />
 
     );
@@ -1059,9 +1063,8 @@ function DocumentView({
   }
 
 
-  const u =
-    proposal.understanding
-    ||
+  const understanding =
+    proposal.understanding ||
     {};
 
 
@@ -1078,7 +1081,8 @@ function DocumentView({
           </h3>
 
           <p>
-            Native extraction and structural signals.
+            Native extraction first.
+            Semantic analysis can follow.
           </p>
 
         </div>
@@ -1089,16 +1093,26 @@ function DocumentView({
       <div className="info-grid">
 
         {[
+
           ["Problem", "problem"],
+
           ["Technology", "technology"],
+
           ["Baseline", "baseline"],
-          ["Proposed solution", "proposed_solution"],
+
+          [
+            "Proposed solution",
+            "proposed_solution",
+          ],
+
         ].map(
           ([label, key]) => (
 
             <div
               className="info-card"
-              key={label}
+              key={
+                label
+              }
             >
 
               <span className="field-label">
@@ -1107,9 +1121,11 @@ function DocumentView({
 
               <p>
 
-                {u[key]
+                {
+                  understanding[key]
                   ||
-                  "Not determined"}
+                  "Not determined"
+                }
 
               </p>
 
@@ -1123,7 +1139,7 @@ function DocumentView({
 
       <div className="panel">
 
-        <div className="section-title">
+        <div className="panel-head">
 
           <div>
 
@@ -1132,17 +1148,31 @@ function DocumentView({
             </h3>
 
             <p>
-              Sections detected in the first pass.
+              Detected structural sections.
             </p>
 
           </div>
+
+
+          <span className="chip">
+
+            {
+              proposal.document
+                ?.sections
+                ?.length
+              ||
+              0
+            }
+
+            {" sections"}
+
+          </span>
 
         </div>
 
 
         {(
-          proposal
-            .document
+          proposal.document
             ?.sections
           ||
           []
@@ -1163,24 +1193,16 @@ function DocumentView({
               <strong>
 
                 {
-
                   Math.round(
-
                     (
                       section.confidence
                       ||
                       0
                     )
-
                     *
-
                     100
-
                   )
-
-                }
-
-                %
+                }%
 
               </strong>
 
@@ -1194,9 +1216,27 @@ function DocumentView({
 
       <div className="panel">
 
-        <h3>
-          Potential technical claims
-        </h3>
+        <div className="panel-head">
+
+          <div>
+
+            <h3>
+              Potential technical claims
+            </h3>
+
+            <p>
+              Signals detected from source text.
+            </p>
+
+          </div>
+
+
+          <SlidersHorizontal
+            size={17}
+            color="#94a3b8"
+          />
+
+        </div>
 
 
         {(
@@ -1217,8 +1257,13 @@ function DocumentView({
             >
 
               <span>
-                {index + 1}
+
+                {
+                  index + 1
+                }
+
               </span>
+
 
               <p>
                 {claim}
@@ -1228,7 +1273,6 @@ function DocumentView({
 
           )
         )}
-
 
       </div>
 
@@ -1241,7 +1285,7 @@ function DocumentView({
 
 function AwardsView({
   awards,
-  upload,
+  upload
 }) {
 
   return (
@@ -1257,7 +1301,7 @@ function AwardsView({
           </h3>
 
           <p>
-            Build a corpus of previous projects.
+            Build a corpus of previous work.
           </p>
 
         </div>
@@ -1290,9 +1334,7 @@ function AwardsView({
 
 
         <span className="upload-button">
-
           Choose file
-
         </span>
 
 
@@ -1303,9 +1345,9 @@ function AwardsView({
           accept=".pdf,.docx,.txt,.md"
 
           onChange={
-            e =>
+            event =>
               upload(
-                e.target.files?.[0]
+                event.target.files?.[0]
               )
           }
 
@@ -1316,16 +1358,39 @@ function AwardsView({
 
       <div className="panel">
 
-        <h3>
-          Loaded corpus
-        </h3>
+        <div className="panel-head">
+
+          <div>
+
+            <h3>
+              Award corpus
+            </h3>
+
+            <p>
+              Documents currently loaded.
+            </p>
+
+          </div>
+
+
+          <span className="chip">
+
+            {
+              awards.length
+            }
+
+          </span>
+
+        </div>
 
 
         {!awards.length && (
 
-          <p className="muted">
-            No award documents loaded.
-          </p>
+          <div className="empty-row">
+
+            No previous awards loaded.
+
+          </div>
 
         )}
 
@@ -1339,7 +1404,7 @@ function AwardsView({
             <div
               className="file-row"
               key={
-                `${award.filename}-${index}`
+                index
               }
             >
 
@@ -1348,7 +1413,11 @@ function AwardsView({
               />
 
               <span>
-                {award.filename}
+
+                {
+                  award.filename
+                }
+
               </span>
 
             </div>
@@ -1366,33 +1435,33 @@ function AwardsView({
 
 
 function ResearchView({
-
   proposal,
-
   research,
-
-  busy,
-
-  search,
-
+  loading,
+  search
 }) {
 
-  const [
-
-    query,
-    setQuery
-
-  ] = useState(
-
+  const defaultQuery =
     proposal
       ?.document
       ?.title
-
     ||
+    "";
 
-    ""
 
+  const [
+    query,
+    setQuery
+  ] = useState(
+    defaultQuery
   );
+
+
+  const encodedQuery =
+    encodeURIComponent(
+      query ||
+      "water technology"
+    );
 
 
   return (
@@ -1408,7 +1477,8 @@ function ResearchView({
           </h3>
 
           <p>
-            Search papers and patent databases.
+            Search literature and jump
+            directly into patent sources.
           </p>
 
         </div>
@@ -1430,17 +1500,17 @@ function ResearchView({
           }
 
           onChange={
-            e =>
+            event =>
               setQuery(
-                e.target.value
+                event.target.value
               )
           }
 
           onKeyDown={
-            e => {
+            event => {
 
               if (
-                e.key === "Enter"
+                event.key === "Enter"
               ) {
 
                 search(
@@ -1462,26 +1532,25 @@ function ResearchView({
         <button
 
           onClick={() =>
-            search(query)
+            search(
+              query
+            )
           }
 
           disabled={
-            busy
+            loading
           }
 
         >
 
-          {busy
-
+          {loading
             ? <Loader2
-                className="spin"
                 size={16}
+                className="spin"
               />
-
             : <Search
                 size={16}
               />
-
           }
 
           Search
@@ -1493,59 +1562,55 @@ function ResearchView({
 
       <div className="source-links">
 
-        {[
-          [
-            "Google Scholar",
-            `https://scholar.google.com/scholar?q=${encodeURIComponent(query || "water technology")}`
-          ],
+        <SourceLink
 
-          [
-            "Google Patents",
-            `https://patents.google.com/?q=${encodeURIComponent(query || "water technology")}`
-          ],
+          name="Google Scholar"
 
-          [
-            "Semantic Scholar",
-            `https://www.semanticscholar.org/search?q=${encodeURIComponent(query || "water technology")}`
-          ],
+          url={
+            `https://scholar.google.com/scholar?q=${encodedQuery}`
+          }
 
-          [
-            "WIPO PATENTSCOPE",
-            `https://patentscope.wipo.int/search/en/result.jsf?query=${encodeURIComponent(query || "water technology")}`
-          ],
+        />
 
-          [
-            "USPTO",
-            "https://ppubs.uspto.gov/pubwebapp/static/pages/landing.html"
-          ],
 
-        ].map(
-          ([name, url]) => (
+        <SourceLink
 
-            <a
-              key={name}
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-            >
+          name="Google Patents"
 
-              {name}
+          url={
+            `https://patents.google.com/?q=${encodedQuery}`
+          }
 
-              <ArrowUpRight
-                size={13}
-              />
+        />
 
-            </a>
 
-          )
-        )}
+        <SourceLink
+
+          name="Semantic Scholar"
+
+          url={
+            `https://www.semanticscholar.org/search?q=${encodedQuery}`
+          }
+
+        />
+
+
+        <SourceLink
+
+          name="WIPO PATENTSCOPE"
+
+          url={
+            `https://patentscope.wipo.int/search/en/result.jsf?query=${encodedQuery}`
+          }
+
+        />
 
       </div>
 
 
       <div className="panel">
 
-        <div className="section-title">
+        <div className="panel-head">
 
           <div>
 
@@ -1559,8 +1624,13 @@ function ResearchView({
 
           </div>
 
+
           <span className="chip">
-            {research.length}
+
+            {
+              research.length
+            }
+
           </span>
 
         </div>
@@ -1568,9 +1638,11 @@ function ResearchView({
 
         {!research.length && (
 
-          <p className="muted">
-            No results yet.
-          </p>
+          <div className="empty-row">
+
+            Run a search to populate the evidence set.
+
+          </div>
 
         )}
 
@@ -1591,9 +1663,7 @@ function ResearchView({
               <div>
 
                 <span className="research-source">
-
                   {item.source}
-
                 </span>
 
                 <span className="muted">
@@ -1625,7 +1695,7 @@ function ResearchView({
 
                 {item.title}
 
-                <ArrowUpRight
+                <ExternalLink
                   size={13}
                 />
 
@@ -1639,6 +1709,38 @@ function ResearchView({
       </div>
 
     </section>
+
+  );
+
+}
+
+
+function SourceLink({
+  name,
+  url
+}) {
+
+  return (
+
+    <a
+
+      href={
+        url
+      }
+
+      target="_blank"
+
+      rel="noreferrer"
+
+    >
+
+      {name}
+
+      <ArrowUpRight
+        size={13}
+      />
+
+    </a>
 
   );
 
@@ -1661,18 +1763,15 @@ function ReviewView() {
 
 
   const [
-
     scores,
-
     setScores
-
   ] = useState(
 
     Object.fromEntries(
 
       criteria.map(
-        item => [
-          item,
+        criterion => [
+          criterion,
           4
         ]
       )
@@ -1689,12 +1788,14 @@ function ReviewView() {
     ).reduce(
 
       (
-        sum,
+        total,
         value
       ) =>
 
-        sum +
-        Number(value),
+        total +
+        Number(
+          value
+        ),
 
       0
 
@@ -1718,7 +1819,7 @@ function ReviewView() {
           </h3>
 
           <p>
-            Preliminary scoring only.
+            Structured scoring workspace.
           </p>
 
         </div>
@@ -1763,6 +1864,7 @@ function ReviewView() {
 
                   onChange={
                     event =>
+
                       setScores({
 
                         ...scores,
@@ -1771,6 +1873,7 @@ function ReviewView() {
                           event.target.value,
 
                       })
+
                   }
 
                 />
@@ -1807,10 +1910,14 @@ function ReviewView() {
 
         <strong>
 
-          {average.toFixed(2)}
+          {
+            average.toFixed(
+              2
+            )
+          }
 
           <small>
-            / 5
+            /5
           </small>
 
         </strong>
@@ -1821,7 +1928,7 @@ function ReviewView() {
           <span
             style={{
               width:
-                `${average / 5 * 100}%`
+                `${(average / 5) * 100}%`
             }}
           />
 
@@ -1866,6 +1973,3 @@ function Empty({
   );
 
 }
-
-
-export default App;
