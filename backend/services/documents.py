@@ -2,18 +2,77 @@ from pathlib import Path
 import re
 
 
+CLAIM_WORDS = re.compile(
+    r"\b("
+    r"novel|innovative|improve|improved|improvement|"
+    r"increase|increased|reduce|reduced|reduction|"
+    r"enhance|enhanced|higher|lower|target|achieve|"
+    r"achieved|demonstrate|demonstrated|performance|"
+    r"efficiency|efficient|optimise|optimize"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+KPI_PATTERN = re.compile(
+    r"("
+    r"\d+(?:\.\d+)?\s*%|"
+    r"\$\s*\d+(?:\.\d+)?\s*[mkb]?|"
+    r"\d+(?:\.\d+)?\s*"
+    r"(?:mg/l|g/l|kg/m3|m3/day|m³/day|"
+    r"kwh|kw|mw|ppm|ppb|bar)|"
+    r"trl\s*\d+|"
+    r"target\s*:\s*[^\n]+"
+    r")",
+    re.IGNORECASE,
+)
+
+
+CONCEPT_PATTERNS = [
+    r"\bceramic membranes?\b",
+    r"\breverse osmosis\b",
+    r"\bmembrane bioreactor\b",
+    r"\bmembranes?\b",
+    r"\bdesalination\b",
+    r"\bwastewater treatment\b",
+    r"\bwastewater\b",
+    r"\bwater treatment\b",
+    r"\bwater reuse\b",
+    r"\bultrafiltration\b",
+    r"\bmicrofiltration\b",
+    r"\bnanofiltration\b",
+    r"\belectrocoagulation\b",
+    r"\belectrowinning\b",
+    r"\belectrochemical\b",
+    r"\belectrolysis\b",
+    r"\banaerobic digestion\b",
+    r"\banaerobic\b",
+    r"\badsorption\b",
+    r"\badvanced oxidation\b",
+    r"\boxidation\b",
+    r"\bresource recovery\b",
+    r"\bcarbon removal\b",
+    r"\bcarbon capture\b",
+    r"\bpfas\b",
+    r"\bsludge\b",
+    r"\bbiogas\b",
+    r"\bdata centres?\b",
+    r"\bsemiconductors?\b",
+    r"\bwafer fabs?\b",
+]
+
+
 SECTION_NAMES = [
+    "executive summary",
     "scientific abstract",
     "abstract",
-    "executive summary",
-    "problem statement",
     "background",
+    "problem statement",
     "research objectives",
     "objectives",
-    "technical kpis",
-    "key performance indicators",
     "methodology",
     "approach",
+    "competitive analysis",
     "landscape scan",
     "literature review",
     "innovativeness",
@@ -23,370 +82,167 @@ SECTION_NAMES = [
     "milestones",
     "budget",
     "impact",
+    "key performance indicators",
+    "technical kpis",
+    "kpis",
     "trl",
 ]
 
 
-TECHNICAL_PATTERNS = [
-    r"\bceramic membranes?\b",
-    r"\bmembranes?\b",
-    r"\bdesalination\b",
-    r"\bwastewater\b",
-    r"\bwater treatment\b",
-    r"\bwater reuse\b",
-    r"\breverse osmosis\b",
-    r"\bultrafiltration\b",
-    r"\bmicrofiltration\b",
-    r"\bnanofiltration\b",
-    r"\banaerobic\b",
-    r"\belectrolysis\b",
-    r"\belectrochemical\b",
-    r"\badsorption\b",
-    r"\boxidation\b",
-    r"\bfiltration\b",
-    r"\bresource recovery\b",
-    r"\bcarbon capture\b",
-    r"\bpfas\b",
-    r"\bsludge\b",
-    r"\bbiogas\b",
-]
-
-
-CLAIM_PATTERN = re.compile(
-    r"\b("
-    r"novel|"
-    r"innovative|"
-    r"improve|"
-    r"improved|"
-    r"improvement|"
-    r"increase|"
-    r"increased|"
-    r"reduction|"
-    r"reduce|"
-    r"reduced|"
-    r"achieve|"
-    r"achieved|"
-    r"target|"
-    r"demonstrate|"
-    r"demonstrated|"
-    r"performance|"
-    r"efficiency|"
-    r"higher|"
-    r"lower|"
-    r"enhance|"
-    r"enhanced"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
-KPI_PATTERN = re.compile(
-    r"("
-    r"\d+(?:\.\d+)?\s*%|"
-    r"\d+(?:\.\d+)?\s*"
-    r"(?:"
-    r"mg\/l|"
-    r"g\/l|"
-    r"kg\/m3|"
-    r"m3\/day|"
-    r"m³\/day|"
-    r"bar|"
-    r"kwh|"
-    r"kw|"
-    r"mw|"
-    r"ppm|"
-    r"ppb"
-    r")|"
-    r"trl\s*\d+"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def parse_document(
-    path: str,
-    filename: str,
-) -> dict:
-
+def parse_document(path: str, filename: str) -> dict:
     suffix = Path(filename).suffix.lower()
 
     if suffix == ".pdf":
-        return parse_pdf(
-            path,
-            filename,
-        )
+        return parse_pdf(path, filename)
 
     if suffix == ".docx":
-        return parse_docx(
-            path,
-            filename,
-        )
+        return parse_docx(path, filename)
 
-    if suffix in {
-        ".txt",
-        ".md",
-    }:
-        return parse_text(
-            path,
-            filename,
-        )
+    if suffix in {".txt", ".md"}:
+        return parse_text(path, filename)
 
     raise ValueError(
-        "Unsupported document type. "
-        "Please upload PDF, DOCX, TXT or MD."
+        "Supported formats are PDF, DOCX, TXT and MD."
     )
 
 
-def parse_pdf(
-    path: str,
-    filename: str,
-) -> dict:
-
+def parse_pdf(path: str, filename: str) -> dict:
     import pymupdf
 
     document = pymupdf.open(path)
-
     pages = []
-    total_chars = 0
 
     try:
-
-        for page_number, page in enumerate(
-            document,
-            start=1,
-        ):
-
-            # ------------------------------------------------
-            # First extraction mode
-            # ------------------------------------------------
-
+        for page_number, page in enumerate(document, start=1):
             text = (
-                page.get_text(
-                    "text",
-                    sort=True,
-                )
+                page.get_text("text", sort=True)
                 or ""
             ).strip()
 
-            # ------------------------------------------------
-            # Fallback extraction
-            # ------------------------------------------------
-
-            if len(text) < 20:
-
-                blocks = (
-                    page.get_text(
-                        "blocks"
-                    )
-                    or []
-                )
-
-                block_text = []
-
-                for block in blocks:
-
-                    if len(block) >= 5:
-
-                        value = str(
-                            block[4]
-                        ).strip()
-
-                        if value:
-
-                            block_text.append(
-                                value
-                            )
-
-                fallback_text = "\n".join(
-                    block_text
-                ).strip()
-
-                if len(fallback_text) > len(text):
-
-                    text = fallback_text
-
-            text_length = len(text)
-
-            total_chars += text_length
+            images = page.get_images(full=True)
 
             pages.append(
                 {
                     "page": page_number,
                     "text": text,
-                    "text_length": text_length,
-                    "needs_visual_review": (
-                        text_length < 200
-                    ),
-                    "has_images": bool(
-                        page.get_images(
-                            full=True
-                        )
-                    ),
-                    "image_count": len(
-                        page.get_images(
-                            full=True
-                        )
-                    ),
+                    "text_length": len(text),
+                    "has_images": bool(images),
+                    "image_count": len(images),
+                    "needs_visual_review": len(text) < 150,
                 }
             )
-
     finally:
-
         document.close()
 
     if not pages:
+        raise ValueError("The PDF contains no pages.")
 
-        raise ValueError(
-            "The PDF contains no pages."
-        )
+    full_text = "\n\n".join(
+        page["text"]
+        for page in pages
+        if page["text"]
+    )
 
     scanned_pages = [
         page["page"]
         for page in pages
-        if page["text_length"] < 200
+        if page["needs_visual_review"]
     ]
 
-    # If almost everything has no text layer,
-    # the PDF is probably scanned/image-based.
     scanned_document = (
-        total_chars < max(
-            500,
-            len(pages) * 100
-        )
+        len(full_text.strip())
+        < max(300, len(pages) * 80)
     )
 
     return {
         "filename": filename,
-        "text": "\n\n".join(
-            page["text"]
-            for page in pages
-            if page["text"]
-        ),
         "pages": pages,
         "page_count": len(pages),
+        "text": full_text,
         "scanned_document": scanned_document,
         "scanned_pages": scanned_pages,
-        "total_characters": total_chars,
     }
 
 
-def parse_docx(
-    path: str,
-    filename: str,
-) -> dict:
-
+def parse_docx(path: str, filename: str) -> dict:
     from docx import Document
 
-    document = Document(
-        path
-    )
-
-    blocks = []
+    document = Document(path)
+    parts = []
 
     for paragraph in document.paragraphs:
-
-        text = (
-            paragraph.text
-            .strip()
-        )
+        text = paragraph.text.strip()
 
         if text:
-
-            blocks.append(
-                text
-            )
+            parts.append(text)
 
     for table in document.tables:
-
         for row in table.rows:
-
             row_text = " | ".join(
                 cell.text.strip()
                 for cell in row.cells
             )
 
-            if row_text:
+            if row_text.strip():
+                parts.append(row_text)
 
-                blocks.append(
-                    row_text
-                )
-
-    text = "\n".join(
-        blocks
-    )
+    text = "\n".join(parts)
 
     return {
         "filename": filename,
-        "text": text,
         "pages": [
             {
                 "page": 1,
                 "text": text,
                 "text_length": len(text),
-                "needs_visual_review": False,
                 "has_images": False,
                 "image_count": 0,
+                "needs_visual_review": False,
             }
         ],
-        "page_count": None,
+        "page_count": 1,
+        "text": text,
         "scanned_document": False,
         "scanned_pages": [],
-        "total_characters": len(text),
     }
 
 
-def parse_text(
-    path: str,
-    filename: str,
-) -> dict:
-
-    text = Path(
-        path
-    ).read_text(
+def parse_text(path: str, filename: str) -> dict:
+    text = Path(path).read_text(
         encoding="utf-8",
         errors="ignore",
     )
 
     return {
         "filename": filename,
-        "text": text,
         "pages": [
             {
                 "page": 1,
                 "text": text,
                 "text_length": len(text),
-                "needs_visual_review": False,
                 "has_images": False,
                 "image_count": 0,
+                "needs_visual_review": False,
             }
         ],
         "page_count": 1,
+        "text": text,
         "scanned_document": False,
         "scanned_pages": [],
-        "total_characters": len(text),
     }
 
 
-def extract_title(
-    text: str,
-    filename: str,
-) -> str:
-
+def extract_title(text: str, filename: str) -> str:
     patterns = [
         (
-            r"(?:"
-            r"title of research project|"
+            r"(?:proposal title|project title|"
             r"research project title|"
-            r"proposal title|"
-            r"project title"
-            r")"
-            r"\s*[:\-]?\s*"
-            r"([^\n]{8,200})"
-        ),
+            r"title of research project)"
+            r"\s*[:\-]?\s*([^\n]{8,200})"
+        )
     ]
 
     for pattern in patterns:
-
         match = re.search(
             pattern,
             text,
@@ -394,45 +250,21 @@ def extract_title(
         )
 
         if match:
-
-            title = (
-                match.group(
-                    1
-                )
-                .strip()
-            )
-
-            if title:
-
-                return title
+            return match.group(1).strip()
 
     for line in text.splitlines():
+        line = line.strip()
 
-        clean = (
-            line
-            .strip()
-        )
+        if 15 <= len(line) <= 180:
+            return line
 
-        if (
-            15 <= len(clean) <= 180
-            and not clean.startswith("[")
-        ):
-
-            return clean
-
-    return Path(
-        filename
-    ).stem
+    return Path(filename).stem
 
 
-def extract_concepts(
-    text: str,
-) -> list:
+def extract_concepts(text: str) -> list[str]:
+    found = []
 
-    concepts = []
-
-    for pattern in TECHNICAL_PATTERNS:
-
+    for pattern in CONCEPT_PATTERNS:
         matches = re.findall(
             pattern,
             text,
@@ -440,175 +272,89 @@ def extract_concepts(
         )
 
         for match in matches:
+            value = str(match).strip().lower()
 
-            concept = (
-                match
-                if isinstance(
-                    match,
-                    str,
-                )
-                else match[0]
-            )
+            if value and value not in found:
+                found.append(value)
 
-            concept = (
-                concept
-                .strip()
-                .lower()
-            )
-
-            if (
-                concept
-                and concept not in concepts
-            ):
-
-                concepts.append(
-                    concept
-                )
-
-    return concepts[:15]
+    return found[:20]
 
 
-def analyze_page(
-    page: dict,
-) -> dict:
-
-    text = page.get(
-        "text",
-        "",
-    )
-
+def analyse_page(page: dict) -> dict:
+    text = page.get("text", "")
     lower = text.lower()
 
     sections = []
 
-    for section in SECTION_NAMES:
+    for name in SECTION_NAMES:
+        if name in lower:
+            display = name.title()
 
-        if section in lower:
+            if display not in sections:
+                sections.append(display)
 
-            display_name = (
-                section.title()
-            )
-
-            if (
-                display_name
-                not in sections
-            ):
-
-                sections.append(
-                    display_name
-                )
-
-    concepts = extract_concepts(
-        text
-    )
+    concepts = extract_concepts(text)
 
     claims = []
     kpis = []
 
-    for line in text.splitlines():
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
 
-        clean = (
-            line
-            .strip()
-        )
-
-        if len(clean) < 30:
-
+        if len(line) < 20:
             continue
 
-        if CLAIM_PATTERN.search(
-            clean
-        ):
+        if CLAIM_WORDS.search(line):
+            if line not in claims:
+                claims.append(line)
 
-            if clean not in claims:
-
-                claims.append(
-                    clean
-                )
-
-        if KPI_PATTERN.search(
-            clean
-        ):
-
-            if clean not in kpis:
-
-                kpis.append(
-                    clean
-                )
-
-        if (
-            len(claims) >= 8
-            and len(kpis) >= 8
-        ):
-
-            break
+        if KPI_PATTERN.search(line):
+            if line not in kpis:
+                kpis.append(line)
 
     return {
-        "page": page.get(
-            "page"
-        ),
-        "sections": sections[:8],
-        "concepts": concepts[:12],
-        "claims": claims[:8],
-        "kpis": kpis[:8],
-        "needs_visual_review": page.get(
-            "needs_visual_review",
-            False,
-        ),
-        "has_images": page.get(
-            "has_images",
-            False,
-        ),
-        "image_count": page.get(
-            "image_count",
-            0,
-        ),
-        "text_preview": (
-            text[:1500]
-            if text
-            else ""
-        ),
+        "page": page["page"],
+        "text_length": page["text_length"],
+        "has_images": page["has_images"],
+        "image_count": page["image_count"],
+        "needs_visual_review": page[
+            "needs_visual_review"
+        ],
+        "sections": sections[:10],
+        "concepts": concepts[:15],
+        "claims": claims[:10],
+        "kpis": kpis[:10],
+        "text_preview": text[:1800],
     }
 
 
-def build_document_dossier(
-    parsed: dict,
-) -> dict:
-
-    text = parsed.get(
-        "text",
-        "",
-    )
-
-    filename = parsed.get(
-        "filename",
-        "proposal",
-    )
+def build_document_dossier(parsed: dict) -> dict:
+    text = parsed.get("text", "")
+    filename = parsed.get("filename", "proposal")
 
     if not text.strip():
-
-        raise ValueError(
-
-            "No readable text was extracted "
-            "from this document. This PDF may "
-            "be scanned or image-only. "
-            "Visual/OCR processing is required."
-
-        )
-
-    title = extract_title(
-        text,
-        filename,
-    )
+        return {
+            "status": "needs_visual_processing",
+            "document": {
+                "filename": filename,
+                "title": Path(filename).stem,
+                "pages": parsed.get("page_count"),
+                "scanned_document": True,
+                "scanned_pages": parsed.get(
+                    "scanned_pages",
+                    [],
+                ),
+            },
+            "concepts": [],
+            "claims": [],
+            "kpis": [],
+            "sections": [],
+            "page_analysis": [],
+        }
 
     page_analysis = [
-        analyze_page(
-            page
-        )
-        for page in parsed.get(
-            "pages",
-            [],
-        )
+        analyse_page(page)
+        for page in parsed.get("pages", [])
     ]
 
     concepts = []
@@ -616,220 +362,82 @@ def build_document_dossier(
     kpis = []
     sections = []
 
-    visual_review_pages = []
-
     for page in page_analysis:
+        page_number = page["page"]
 
-        page_number = page.get(
-            "page"
-        )
-
-        for concept in page.get(
-            "concepts",
-            [],
-        ):
-
+        for concept in page["concepts"]:
             if concept not in concepts:
+                concepts.append(concept)
 
-                concepts.append(
-                    concept
-                )
-
-        for claim in page.get(
-            "claims",
-            [],
-        ):
-
+        for claim in page["claims"]:
             claims.append(
                 {
-                    "page":
-                        page_number,
-
-                    "text":
-                        claim,
+                    "page": page_number,
+                    "text": claim,
                 }
             )
 
-        for kpi in page.get(
-            "kpis",
-            [],
-        ):
-
+        for kpi in page["kpis"]:
             kpis.append(
                 {
-                    "page":
-                        page_number,
-
-                    "text":
-                        kpi,
+                    "page": page_number,
+                    "text": kpi,
                 }
             )
 
-        for section in page.get(
-            "sections",
-            [],
-        ):
-
+        for section in page["sections"]:
             sections.append(
                 {
-                    "page":
-                        page_number,
-
-                    "name":
-                        section,
+                    "page": page_number,
+                    "name": section,
                 }
             )
 
-        if page.get(
-            "needs_visual_review",
-            False,
-        ):
-
-            visual_review_pages.append(
-                page_number
-            )
-
-    unique_claims = []
-
-    seen_claims = set()
-
-    for claim in claims:
-
-        key = (
-            claim.get(
-                "text",
-                "",
-            )
-            .strip()
-            .lower()
-        )
-
-        if (
-            not key
-            or key in seen_claims
-        ):
-
-            continue
-
-        seen_claims.add(
-            key
-        )
-
-        unique_claims.append(
-            claim
-        )
-
-    unique_kpis = []
-
-    seen_kpis = set()
-
-    for kpi in kpis:
-
-        key = (
-            kpi.get(
-                "text",
-                "",
-            )
-            .strip()
-            .lower()
-        )
-
-        if (
-            not key
-            or key in seen_kpis
-        ):
-
-            continue
-
-        seen_kpis.add(
-            key
-        )
-
-        unique_kpis.append(
-            kpi
-        )
-
-    unique_sections = []
-
-    seen_sections = set()
-
-    for section in sections:
-
-        key = (
-            section.get(
-                "page"
-            ),
-            section.get(
-                "name"
-            ),
-        )
-
-        if key in seen_sections:
-
-            continue
-
-        seen_sections.add(
-            key
-        )
-
-        unique_sections.append(
-            section
-        )
-
     return {
-
+        "status": "ready",
         "document": {
-
-            "filename":
+            "filename": filename,
+            "title": extract_title(
+                text,
                 filename,
-
-            "title":
-                title,
-
-            "pages":
-                parsed.get(
-                    "page_count"
-                ),
-
-            "total_characters":
-                parsed.get(
-                    "total_characters",
-                    len(text),
-                ),
-
-            "scanned_document":
-                parsed.get(
-                    "scanned_document",
-                    False,
-                ),
-
-            "scanned_pages":
-                parsed.get(
-                    "scanned_pages",
-                    [],
-                ),
-
-            "visual_review_pages":
-                visual_review_pages,
-
+            ),
+            "pages": parsed.get("page_count"),
+            "scanned_document": parsed.get(
+                "scanned_document",
+                False,
+            ),
+            "scanned_pages": parsed.get(
+                "scanned_pages",
+                [],
+            ),
         },
-
-        "concepts":
-            concepts[:15],
-
-        "claims":
-            unique_claims[:30],
-
-        "kpis":
-            unique_kpis[:30],
-
-        "sections":
-            unique_sections,
-
-        "page_analysis":
-            page_analysis,
-
-        "raw_text":
-            text,
-
+        "concepts": concepts[:20],
+        "claims": deduplicate_items(
+            claims
+        )[:40],
+        "kpis": deduplicate_items(
+            kpis
+        )[:40],
+        "sections": sections,
+        "page_analysis": page_analysis,
     }
+
+
+def deduplicate_items(items: list[dict]) -> list[dict]:
+    result = []
+    seen = set()
+
+    for item in items:
+        text = (
+            item.get("text", "")
+            .strip()
+            .lower()
+        )
+
+        if not text or text in seen:
+            continue
+
+        seen.add(text)
+        result.append(item)
+
+    return result
