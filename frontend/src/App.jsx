@@ -33,14 +33,12 @@ function App() {
     "overview"
   );
 
-
   const [
     proposal,
     setProposal
   ] = useState(
     null
   );
-
 
   const [
     awards,
@@ -49,7 +47,6 @@ function App() {
     []
   );
 
-
   const [
     research,
     setResearch
@@ -57,14 +54,12 @@ function App() {
     []
   );
 
-
   const [
     busy,
     setBusy
   ] = useState(
     false
   );
-
 
   const [
     message,
@@ -78,14 +73,15 @@ function App() {
     file
   ) {
 
-    if (!file) return;
+    if (!file) {
+      return;
+    }
 
     setBusy(true);
 
     setMessage(
       "Reading proposal..."
     );
-
 
     const form =
       new FormData();
@@ -100,13 +96,19 @@ function App() {
 
       const response =
         await fetch(
+
           `${API}/proposals/analyze`,
+
           {
+
             method:
               "POST",
+
             body:
-              form
+              form,
+
           }
+
         );
 
 
@@ -117,9 +119,11 @@ function App() {
       if (!response.ok) {
 
         throw new Error(
+
           data.detail
           ||
           "Upload failed."
+
         );
 
       }
@@ -174,7 +178,6 @@ function App() {
 
     setBusy(true);
 
-
     setMessage(
       "Searching research..."
     );
@@ -191,7 +194,7 @@ function App() {
             "2020",
 
           limit:
-            "10"
+            "10",
 
         });
 
@@ -203,7 +206,7 @@ function App() {
 
           {
             method:
-              "POST"
+              "POST",
           }
 
         );
@@ -216,9 +219,11 @@ function App() {
       if (!response.ok) {
 
         throw new Error(
+
           data.detail
           ||
           "Research search failed."
+
         );
 
       }
@@ -232,7 +237,9 @@ function App() {
 
 
       setMessage(
+
         `Found ${data.count || 0} records.`
+
       );
 
 
@@ -257,8 +264,9 @@ function App() {
     file
   ) {
 
-    if (!file) return;
-
+    if (!file) {
+      return;
+    }
 
     setBusy(true);
 
@@ -284,10 +292,13 @@ function App() {
           `${API}/proposals/analyze`,
 
           {
+
             method:
               "POST",
+
             body:
-              form
+              form,
+
           }
 
         );
@@ -300,9 +311,11 @@ function App() {
       if (!response.ok) {
 
         throw new Error(
+
           data.detail
           ||
           "Award upload failed."
+
         );
 
       }
@@ -314,15 +327,16 @@ function App() {
           ...previous,
 
           {
+
             filename:
               file.name,
 
             text:
               data.raw_text
               ||
-              ""
+              "",
 
-          }
+          },
 
         ]
 
@@ -398,6 +412,7 @@ function App() {
             }
           />
 
+
           <Nav
             active={
               tab === "document"
@@ -410,6 +425,7 @@ function App() {
               setTab("document")
             }
           />
+
 
           <Nav
             active={
@@ -424,6 +440,7 @@ function App() {
             }
           />
 
+
           <Nav
             active={
               tab === "research"
@@ -436,6 +453,7 @@ function App() {
               setTab("research")
             }
           />
+
 
           <Nav
             active={
@@ -480,16 +498,22 @@ function App() {
 
               {
                 {
+
                   overview:
                     "Research with context.",
+
                   document:
                     "Document understanding",
+
                   awards:
                     "Award landscape",
+
                   research:
                     "Research & IP",
+
                   review:
-                    "Human reviewer"
+                    "Human reviewer",
+
                 }[tab]
               }
 
@@ -534,21 +558,27 @@ function App() {
             proposal={
               proposal
             }
+
             awards={
               awards
             }
+
             research={
               research
             }
+
             busy={
               busy
             }
+
             upload={
               uploadProposal
             }
+
             goTo={
               setTab
             }
+
           />
 
         )}
@@ -568,15 +598,14 @@ function App() {
         {tab === "awards" && (
 
           <AwardsView
-            proposal={
-              proposal
-            }
             awards={
               awards
             }
+
             upload={
               uploadAward
             }
+
           />
 
         )}
@@ -588,15 +617,19 @@ function App() {
             proposal={
               proposal
             }
+
             research={
               research
             }
+
             busy={
               busy
             }
+
             search={
               searchResearch
             }
+
           />
 
         )}
@@ -662,12 +695,19 @@ function Nav({
 
 
 function Overview({
+
   proposal,
+
   awards,
+
   research,
+
   busy,
+
   upload,
-  goTo
+
+  goTo,
+
 }) {
 
   return (
@@ -693,9 +733,10 @@ function Overview({
 
           <p>
 
-            Turn a technical proposal into
-            structured evidence, research
-            leads and reviewer questions.
+            Turn a technical proposal
+            into structured evidence,
+            research leads and
+            reviewer questions.
 
           </p>
 
@@ -770,13 +811,16 @@ function Overview({
         <div className="upload-icon">
 
           {busy
+
             ? <Loader2
                 className="spin"
                 size={20}
               />
+
             : <Upload
                 size={20}
               />
+
           }
 
         </div>
@@ -787,8 +831,12 @@ function Overview({
           <strong>
 
             {busy
+
               ? "Reading document..."
-              : "Drop a proposal here"}
+
+              : "Drop a proposal here"
+
+            }
 
           </strong>
 
@@ -914,7 +962,9 @@ function Overview({
                     ?.pages
                   ||
                   "?"
-                } pages
+                }
+
+                {" pages"}
 
               </small>
 
@@ -1009,7 +1059,7 @@ function DocumentView({
   }
 
 
-  const understanding =
+  const u =
     proposal.understanding
     ||
     {};
@@ -1028,8 +1078,7 @@ function DocumentView({
           </h3>
 
           <p>
-            Native extraction and
-            structural signals.
+            Native extraction and structural signals.
           </p>
 
         </div>
@@ -1043,7 +1092,7 @@ function DocumentView({
           ["Problem", "problem"],
           ["Technology", "technology"],
           ["Baseline", "baseline"],
-          ["Proposed solution", "proposed_solution"]
+          ["Proposed solution", "proposed_solution"],
         ].map(
           ([label, key]) => (
 
@@ -1058,7 +1107,7 @@ function DocumentView({
 
               <p>
 
-                {understanding[key]
+                {u[key]
                   ||
                   "Not determined"}
 
@@ -1083,8 +1132,7 @@ function DocumentView({
             </h3>
 
             <p>
-              Sections detected in the
-              first pass.
+              Sections detected in the first pass.
             </p>
 
           </div>
@@ -1092,11 +1140,14 @@ function DocumentView({
         </div>
 
 
-        {(proposal.document?.sections
+        {(
+          proposal
+            .document
+            ?.sections
           ||
           []
         ).map(
-          (section) => (
+          section => (
 
             <div
               className="row-line"
@@ -1110,12 +1161,27 @@ function DocumentView({
               </span>
 
               <strong>
+
                 {
+
                   Math.round(
-                    (section.confidence || 0)
-                    * 100
+
+                    (
+                      section.confidence
+                      ||
+                      0
+                    )
+
+                    *
+
+                    100
+
                   )
-                }%
+
+                }
+
+                %
+
               </strong>
 
             </div>
@@ -1132,12 +1198,22 @@ function DocumentView({
           Potential technical claims
         </h3>
 
-        {(proposal.claims || []).map(
-          (claim, index) => (
+
+        {(
+          proposal.claims
+          ||
+          []
+        ).map(
+          (
+            claim,
+            index
+          ) => (
 
             <div
               className="claim"
-              key={index}
+              key={
+                index
+              }
             >
 
               <span>
@@ -1153,6 +1229,7 @@ function DocumentView({
           )
         )}
 
+
       </div>
 
     </section>
@@ -1164,7 +1241,7 @@ function DocumentView({
 
 function AwardsView({
   awards,
-  upload
+  upload,
 }) {
 
   return (
@@ -1180,8 +1257,7 @@ function AwardsView({
           </h3>
 
           <p>
-            Build a corpus of previous
-            projects for comparison.
+            Build a corpus of previous projects.
           </p>
 
         </div>
@@ -1192,8 +1268,13 @@ function AwardsView({
       <label className="upload">
 
         <div className="upload-icon">
-          <Upload size={20} />
+
+          <Upload
+            size={20}
+          />
+
         </div>
+
 
         <div>
 
@@ -1207,19 +1288,27 @@ function AwardsView({
 
         </div>
 
+
         <span className="upload-button">
+
           Choose file
+
         </span>
 
+
         <input
+
           type="file"
+
           accept=".pdf,.docx,.txt,.md"
+
           onChange={
             e =>
               upload(
                 e.target.files?.[0]
               )
           }
+
         />
 
       </label>
@@ -1231,7 +1320,8 @@ function AwardsView({
           Loaded corpus
         </h3>
 
-        {awards.length === 0 && (
+
+        {!awards.length && (
 
           <p className="muted">
             No award documents loaded.
@@ -1241,11 +1331,16 @@ function AwardsView({
 
 
         {awards.map(
-          (award, index) => (
+          (
+            award,
+            index
+          ) => (
 
             <div
               className="file-row"
-              key={index}
+              key={
+                `${award.filename}-${index}`
+              }
             >
 
               <FileText
@@ -1271,19 +1366,32 @@ function AwardsView({
 
 
 function ResearchView({
+
   proposal,
+
   research,
+
   busy,
-  search
+
+  search,
+
 }) {
 
   const [
+
     query,
     setQuery
+
   ] = useState(
-    proposal?.document?.title
+
+    proposal
+      ?.document
+      ?.title
+
     ||
+
     ""
+
   );
 
 
@@ -1300,8 +1408,7 @@ function ResearchView({
           </h3>
 
           <p>
-            Search papers and move directly
-            into patent research.
+            Search papers and patent databases.
           </p>
 
         </div>
@@ -1311,7 +1418,10 @@ function ResearchView({
 
       <div className="search">
 
-        <Search size={18} />
+        <Search
+          size={18}
+        />
+
 
         <input
 
@@ -1328,11 +1438,17 @@ function ResearchView({
 
           onKeyDown={
             e => {
+
               if (
                 e.key === "Enter"
               ) {
-                search(query);
+
+                search(
+                  query
+                );
+
               }
+
             }
           }
 
@@ -1342,23 +1458,30 @@ function ResearchView({
 
         />
 
+
         <button
+
           onClick={() =>
             search(query)
           }
+
           disabled={
             busy
           }
+
         >
 
           {busy
+
             ? <Loader2
                 className="spin"
                 size={16}
               />
+
             : <Search
                 size={16}
               />
+
           }
 
           Search
@@ -1375,22 +1498,27 @@ function ResearchView({
             "Google Scholar",
             `https://scholar.google.com/scholar?q=${encodeURIComponent(query || "water technology")}`
           ],
+
           [
             "Google Patents",
             `https://patents.google.com/?q=${encodeURIComponent(query || "water technology")}`
           ],
+
           [
             "Semantic Scholar",
             `https://www.semanticscholar.org/search?q=${encodeURIComponent(query || "water technology")}`
           ],
+
           [
             "WIPO PATENTSCOPE",
             `https://patentscope.wipo.int/search/en/result.jsf?query=${encodeURIComponent(query || "water technology")}`
           ],
+
           [
             "USPTO",
             "https://ppubs.uspto.gov/pubwebapp/static/pages/landing.html"
-          ]
+          ],
+
         ].map(
           ([name, url]) => (
 
@@ -1448,37 +1576,51 @@ function ResearchView({
 
 
         {research.map(
-          (item, index) => (
+          (
+            item,
+            index
+          ) => (
 
             <div
               className="research-item"
-              key={index}
+              key={
+                index
+              }
             >
 
               <div>
 
                 <span className="research-source">
+
                   {item.source}
+
                 </span>
 
                 <span className="muted">
+
+                  {" "}
                   {item.year || ""}
                   {" · "}
                   {item.citations || 0}
                   {" citations"}
+
                 </span>
 
               </div>
 
 
               <a
+
                 href={
                   item.url
                   ||
                   "#"
                 }
+
                 target="_blank"
+
                 rel="noreferrer"
+
               >
 
                 {item.title}
@@ -1508,23 +1650,29 @@ function ReviewView() {
   const criteria = [
 
     "Science & technology",
+
     "Impact / national benefit",
+
     "Management & delivery",
-    "Budget / value"
+
+    "Budget / value",
 
   ];
 
 
   const [
+
     scores,
+
     setScores
+
   ] = useState(
 
     Object.fromEntries(
 
       criteria.map(
-        x => [
-          x,
+        item => [
+          item,
           4
         ]
       )
@@ -1540,7 +1688,11 @@ function ReviewView() {
       scores
     ).reduce(
 
-      (sum, value) =>
+      (
+        sum,
+        value
+      ) =>
+
         sum +
         Number(value),
 
@@ -1567,7 +1719,6 @@ function ReviewView() {
 
           <p>
             Preliminary scoring only.
-            The panel makes the final decision.
           </p>
 
         </div>
@@ -1582,12 +1733,15 @@ function ReviewView() {
 
             <div
               className="review-card"
-              key={criterion}
+              key={
+                criterion
+              }
             >
 
               <span className="field-label">
                 {criterion}
               </span>
+
 
               <div className="slider">
 
@@ -1602,22 +1756,36 @@ function ReviewView() {
                   step="1"
 
                   value={
-                    scores[criterion]
+                    scores[
+                      criterion
+                    ]
                   }
 
                   onChange={
-                    e =>
+                    event =>
                       setScores({
+
                         ...scores,
+
                         [criterion]:
-                          e.target.value
+                          event.target.value,
+
                       })
                   }
 
                 />
 
+
                 <strong>
-                  {scores[criterion]}/5
+
+                  {
+                    scores[
+                      criterion
+                    ]
+                  }
+
+                  /5
+
                 </strong>
 
               </div>
@@ -1636,6 +1804,7 @@ function ReviewView() {
           PRELIMINARY SCORE
         </span>
 
+
         <strong>
 
           {average.toFixed(2)}
@@ -1645,6 +1814,7 @@ function ReviewView() {
           </small>
 
         </strong>
+
 
         <div className="score-bar">
 
