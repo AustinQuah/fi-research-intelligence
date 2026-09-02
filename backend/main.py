@@ -145,3 +145,14 @@ async def analyze_proposal(
 
             except OSError:
                 pass
+
+        parsed = parse_document(
+            path,
+            filename,
+        )
+        
+        dossier = build_document_dossier(
+            parsed
+        )
+        
+        return dossier
