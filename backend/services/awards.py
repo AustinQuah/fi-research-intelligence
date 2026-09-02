@@ -64,8 +64,19 @@ async def compare_awards(
 
             for topic in TOPICS
 
-            if topic in proposal_text
-            and topic in award_text
+            if (
+                topic
+                in
+                proposal_text
+            )
+
+            and
+
+            (
+                topic
+                in
+                award_text
+            )
 
         ]
 
@@ -98,7 +109,7 @@ async def compare_awards(
             "filename":
                 award.get(
                     "filename",
-                    "Unknown"
+                    "Unknown",
                 ),
 
             "relationship":
@@ -109,7 +120,9 @@ async def compare_awards(
                     "Shared topic signals: "
                     +
                     (
-                        ", ".join(shared)
+                        ", ".join(
+                            shared
+                        )
                         if shared
                         else
                         "none detected"
