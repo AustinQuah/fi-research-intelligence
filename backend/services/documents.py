@@ -7,30 +7,52 @@ def parse_document(
     filename: str,
 ) -> dict:
 
-    suffix = Path(
-        filename
-    ).suffix.lower()
+    suffix = (
+        Path(filename)
+        .suffix
+        .lower()
+    )
 
     if suffix == ".pdf":
-        return parse_pdf(path, filename)
+
+        return parse_pdf(
+            path,
+            filename,
+        )
 
     if suffix == ".docx":
-        return parse_docx(path, filename)
 
-    if suffix in {".txt", ".md"}:
+        return parse_docx(
+            path,
+            filename,
+        )
+
+    if suffix in {
+        ".txt",
+        ".md",
+    }:
 
         return {
-            "filename": filename,
-            "text": Path(path).read_text(
-                encoding="utf-8",
-                errors="ignore",
-            ),
-            "pages": None,
-            "visual_pages": [],
+
+            "filename":
+                filename,
+
+            "text":
+                Path(path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                ),
+
+            "pages":
+                None,
+
+            "visual_pages":
+                [],
+
         }
 
     raise ValueError(
-        "Supported files: PDF, DOCX, TXT, MD"
+        "Supported formats: PDF, DOCX, TXT, MD"
     )
 
 
@@ -41,29 +63,37 @@ def parse_pdf(
 
     import pymupdf
 
-    document = pymupdf.open(path)
+    document = pymupdf.open(
+        path
+    )
 
     pages = []
     visual_pages = []
 
-    for page_number, page in enumerate(
+    for number, page in enumerate(
         document,
         start=1,
     ):
 
-        text = page.get_text(
-            "text"
-        ) or ""
-
-        pages.append(
-            f"[PAGE {page_number}]\n{text}"
+        text = (
+            page
+            .get_text("text")
+            or ""
         )
 
-        # Fast first pass.
-        # We do NOT perform OCR here.
-        if len(text.strip()) < 250:
+        pages.append(
+            f"[PAGE {number}]\n{text}"
+        )
+
+        # Fast pass:
+        # sparse pages are flagged
+        # for future visual processing.
+        if len(
+            text.strip()
+        ) < 250:
+
             visual_pages.append(
-                page_number
+                number
             )
 
     page_count = len(
@@ -73,10 +103,21 @@ def parse_pdf(
     document.close()
 
     return {
-        "filename": filename,
-        "text": "\n\n".join(pages),
-        "pages": page_count,
-        "visual_pages": visual_pages,
+
+        "filename":
+            filename,
+
+        "text":
+            "\n\n".join(
+                pages
+            ),
+
+        "pages":
+            page_count,
+
+        "visual_pages":
+            visual_pages,
+
     }
 
 
@@ -87,33 +128,63 @@ def parse_docx(
 
     from docx import Document
 
-    document = Document(path)
+    document = Document(
+        path
+    )
 
     parts = []
 
-    for paragraph in document.paragraphs:
+    for paragraph in (
+        document.paragraphs
+    ):
 
-        text = paragraph.text.strip()
+        text = (
+            paragraph
+            .text
+            .strip()
+        )
 
         if text:
-            parts.append(text)
 
-    for table in document.tables:
+            parts.append(
+                text
+            )
+
+    for table in (
+        document.tables
+    ):
 
         for row in table.rows:
 
             parts.append(
+
                 " | ".join(
+
                     cell.text.strip()
-                    for cell in row.cells
+
+                    for cell
+                    in row.cells
+
                 )
+
             )
 
     return {
-        "filename": filename,
-        "text": "\n".join(parts),
-        "pages": None,
-        "visual_pages": [],
+
+        "filename":
+            filename,
+
+        "text":
+            "\n".join(
+                parts
+            ),
+
+        "pages":
+            None,
+
+        "visual_pages":
+            [],
+
     }
 
 
@@ -129,26 +200,35 @@ def quick_understanding(
     lower = text.lower()
 
     # --------------------------------------------------------
-    # Title
+    # TITLE
     # --------------------------------------------------------
 
     title = None
 
     match = re.search(
+
         r"(?:title of research project|"
         r"research project title|"
         r"proposal title|"
         r"project title)"
         r"\s*[:\-]?\s*([^\n]{8,180})",
+
         text,
+
         re.IGNORECASE,
+
     )
 
     if match:
-        title = match.group(1).strip()
+
+        title = (
+            match
+            .group(1)
+            .strip()
+        )
 
     # --------------------------------------------------------
-    # Funding initiative
+    # FI
     # --------------------------------------------------------
 
     if (
@@ -156,19 +236,26 @@ def quick_understanding(
         and "water" in lower
     ):
 
-        fi = "Living Lab (Water)"
+        fi = (
+            "Living Lab (Water)"
+        )
 
     elif (
         "industrial water solutions"
         in lower
-        or "wafer fab" in lower
+        or "wafer fab"
+        in lower
     ):
 
-        fi = "Industrial Water Solutions (IWS)"
+        fi = (
+            "Industrial Water Solutions (IWS)"
+        )
 
     elif (
-        "municipal water" in lower
-        or "mwtd" in lower
+        "municipal water"
+        in lower
+        or "mwtd"
+        in lower
     ):
 
         fi = (
@@ -191,12 +278,15 @@ def quick_understanding(
         fi = None
 
     # --------------------------------------------------------
-    # Type
+    # DOCUMENT TYPE
     # --------------------------------------------------------
 
     if (
-        "funding initiative" in lower
-        and "desired outcomes" in lower
+        "funding initiative"
+        in lower
+        and
+        "desired outcomes"
+        in lower
     ):
 
         document_type = (
@@ -204,8 +294,11 @@ def quick_understanding(
         )
 
     elif (
-        "project proposal" in lower
-        or "scientific abstract" in lower
+        "project proposal"
+        in lower
+        or
+        "scientific abstract"
+        in lower
     ):
 
         document_type = (
@@ -214,13 +307,15 @@ def quick_understanding(
 
     else:
 
-        document_type = "Unknown"
+        document_type = (
+            "Unknown"
+        )
 
     # --------------------------------------------------------
-    # Sections
+    # SECTION MAP
     # --------------------------------------------------------
 
-    known_sections = [
+    section_names = [
 
         "Scientific Abstract",
         "Problem Statement",
@@ -239,14 +334,14 @@ def quick_understanding(
 
     sections = []
 
-    for section in known_sections:
+    for name in section_names:
 
-        if section.lower() in lower:
+        if name.lower() in lower:
 
             sections.append({
 
                 "name":
-                    section,
+                    name,
 
                 "confidence":
                     0.50,
@@ -254,7 +349,7 @@ def quick_understanding(
             })
 
     # --------------------------------------------------------
-    # Claims
+    # CLAIM SIGNALS
     # --------------------------------------------------------
 
     claims = []
@@ -264,6 +359,7 @@ def quick_understanding(
         line = line.strip()
 
         if len(line) < 40:
+
             continue
 
         if re.search(
@@ -285,28 +381,31 @@ def quick_understanding(
             )
 
         if len(claims) >= 12:
+
             break
 
     # --------------------------------------------------------
-    # Summary
+    # QUICK SUMMARY
     # --------------------------------------------------------
 
-    lines = [
+    meaningful = [
 
         line.strip()
 
         for line in text.splitlines()
 
-        if len(line.strip()) > 80
+        if len(
+            line.strip()
+        ) > 80
 
     ]
 
     summary = None
 
-    if lines:
+    if meaningful:
 
         summary = " ".join(
-            lines[:3]
+            meaningful[:3]
         )
 
         if len(summary) > 800:
@@ -399,10 +498,10 @@ def quick_understanding(
 
                 "detail":
                     (
-                        "The proposal was parsed "
-                        "without OCR. Sparse pages "
-                        "are flagged for later "
-                        "visual processing."
+                        "The proposal has been "
+                        "parsed without OCR. "
+                        "Sparse pages are flagged "
+                        "for later visual analysis."
                     ),
 
             }
