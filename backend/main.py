@@ -136,23 +136,15 @@ async def analyze_proposal(
 
     finally:
 
+        # Ensure temporary file is removed but do NOT re-run
+        # parsing or return from here. Previously this block
+        # attempted to re-parse the file and return a value,
+        # which could raise errors and override the successful
+        # response. Keep cleanup only.
         if path:
-
             try:
                 os.unlink(
                     path
                 )
-
             except OSError:
                 pass
-
-        parsed = parse_document(
-            path,
-            filename,
-        )
-        
-        dossier = build_document_dossier(
-            parsed
-        )
-        
-        return dossier
