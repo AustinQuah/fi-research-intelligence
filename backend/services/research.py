@@ -12,29 +12,17 @@ async def get_json(
 ) -> dict:
 
     if url in CACHE:
-
-        return CACHE[
-            url
-        ]
-
-    headers = {
-
-        "Accept":
-            "application/json",
-
-        "User-Agent":
-            "FI-Research-Intelligence/1.0",
-
-    }
+        return CACHE[url]
 
     async with httpx.AsyncClient(
-
-        timeout=30,
-
+        timeout=25,
         follow_redirects=True,
-
-        headers=headers,
-
+        headers={
+            "Accept": "application/json",
+            "User-Agent": (
+                "FI-Research-Intelligence/2.0"
+            ),
+        },
     ) as client:
 
         for attempt in range(4):
@@ -45,61 +33,18 @@ async def get_json(
 
             if response.status_code == 200:
 
-                data = (
-                    response.json()
-                )
+                data = response.json()
 
-                CACHE[
-                    url
-                ] = data
+                CACHE[url] = data
 
                 return data
 
-            if (
-                response.status_code
-                == 429
-            ):
-
-                retry_after = (
-                    response
-                    .headers
-                    .get(
-                        "Retry-After"
-                    )
-                )
-
-                try:
-
-                    delay = (
-
-                        float(
-                            retry_after
-                        )
-
-                        if retry_after
-
-                        else
-
-                        1.5
-                        *
-                        (
-                            2 ** attempt
-                        )
-
-                    )
-
-                except ValueError:
-
-                    delay = (
-                        1.5
-                        *
-                        (
-                            2 ** attempt
-                        )
-                    )
+            if response.status_code == 429:
 
                 await asyncio.sleep(
-                    delay
+                    1.5 * (
+                        2 ** attempt
+                    )
                 )
 
                 continue
@@ -107,51 +52,115 @@ async def get_json(
             response.raise_for_status()
 
     raise RuntimeError(
-        "Research provider unavailable after retries."
+        "Research provider unavailable."
     )
 
 
-async def research_pass(
-    query: str,
-    year: int = 2020,
-    limit: int = 10,
+def build_queries(
+    dossier: dict,
 ) -> list:
 
-    query = query.strip()
-
-    if not query:
-
-        raise ValueError(
-            "Research query cannot be empty."
-        )
-
-    # ========================================================
-    # OPENALEX
-    # ========================================================
-
-    openalex_url = (
-
-        "https://api.openalex.org/works"
-
-        f"?search={quote(query)}"
-
-        f"&filter="
-        f"from_publication_date:{year}-01-01,"
-        f"type:article|review"
-
-        f"&per-page={limit}"
-
+    concepts = dossier.get(
+        "concepts",
+        [],
     )
 
-    openalex = await get_json(
-        openalex_url
+    queries = []
+
+    # Individual concepts
+
+    for concept in concepts[:8]:
+
+        queries.append(
+            concept
+        )
+
+    # Concept combinations are usually
+    # more useful than one giant title search.
+
+    if len(concepts) >= 2:
+
+        queries.append(
+            " ".join(
+                concepts[:2]
+            )
+        )
+
+    if len(concepts) >= 3:
+
+        queries.append(
+            " ".join(
+                concepts[:3]
+            )
+        )
+
+    # Claims can generate targeted
+    # literature questions.
+
+    for claim in dossier.get(
+        "claims",
+        [],
+    )[:3]:
+
+        text = claim.get(
+            "text",
+            "",
+        )
+
+        words = text.split()
+
+        if len(words) > 5:
+
+            queries.append(
+                " ".join(
+                    words[:14]
+                )
+            )
+
+    clean = []
+
+    for query in queries:
+
+        query = (
+            query
+            .strip()
+            .lower()
+        )
+
+        if (
+            query
+            and query not in clean
+        ):
+
+            clean.append(
+                query
+            )
+
+    return clean[:8]
+
+
+async def search_openalex(
+    query: str,
+    limit: int = 5,
+) -> list:
+
+    url = (
+        "https://api.openalex.org/works"
+        f"?search={quote(query)}"
+        "&filter=from_publication_date:2018-01-01,"
+        "type:article|review"
+        f"&per-page={limit}"
+    )
+
+    data = await get_json(
+        url
     )
 
     results = []
 
-    for item in openalex.get(
+    for item in data.get(
         "results",
-        []
+        [],
     ):
 
         location = (
@@ -161,211 +170,214 @@ async def research_pass(
             or {}
         )
 
-        results.append({
-
-            "source":
-                "OpenAlex",
-
-            "title":
-                item.get(
-                    "title"
-                )
-                or
-                "Untitled",
-
-            "year":
-                item.get(
+        results.append(
+            {
+                "source": "OpenAlex",
+                "title": (
+                    item.get(
+                        "title"
+                    )
+                    or "Untitled"
+                ),
+                "year": item.get(
                     "publication_year"
                 ),
-
-            "citations":
-                item.get(
+                "citations": item.get(
                     "cited_by_count",
                     0,
                 ),
-
-            "doi":
-                item.get(
+                "doi": item.get(
                     "doi"
                 ),
-
-            "url":
-                location.get(
-                    "landing_page_url"
-                )
-                or
-                item.get(
-                    "doi"
-                )
-                or
-                item.get(
-                    "id"
+                "url": (
+                    location.get(
+                        "landing_page_url"
+                    )
+                    or item.get(
+                        "doi"
+                    )
+                    or item.get(
+                        "id"
+                    )
                 ),
+                "query": query,
+            }
+        )
 
-        })
+    return results
 
-    # Courtesy delay.
 
-    await asyncio.sleep(
-        0.75
-    )
+async def search_crossref(
+    query: str,
+    limit: int = 5,
+) -> list:
 
-    # ========================================================
-    # CROSSREF
-    # ========================================================
-
-    crossref_url = (
-
+    url = (
         "https://api.crossref.org/works"
-
-        f"?query.bibliographic="
-        f"{quote(query)}"
-
-        f"&filter="
-        f"from-pub-date:{year}-01-01"
-
+        f"?query.bibliographic={quote(query)}"
+        "&filter=from-pub-date:2018-01-01"
         f"&rows={limit}"
-
     )
 
-    crossref = await get_json(
-        crossref_url
+    data = await get_json(
+        url
     )
+
+    results = []
 
     for item in (
-
-        crossref
+        data
         .get(
             "message",
-            {}
+            {},
         )
         .get(
             "items",
-            []
+            [],
         )
-
     ):
+
+        title_list = (
+            item.get(
+                "title"
+            )
+            or
+            ["Untitled"]
+        )
 
         doi = item.get(
             "DOI"
         )
 
-        dates = (
-
+        date_parts = (
             item
             .get(
                 "published",
-                {}
+                {},
             )
             .get(
                 "date-parts",
-                [[None]]
+                [[None]],
             )
-
         )
 
-        results.append({
-
-            "source":
-                "Crossref",
-
-            "title":
-                (
-                    item.get(
-                        "title"
-                    )
-                    or
-                    ["Untitled"]
-                )[0],
-
-            "year":
-                (
-                    dates[0][0]
-                    if dates
+        results.append(
+            {
+                "source": "Crossref",
+                "title": title_list[0],
+                "year": (
+                    date_parts[0][0]
+                    if date_parts
                     else None
                 ),
-
-            "citations":
-                item.get(
+                "citations": item.get(
                     "is-referenced-by-count",
                     0,
                 ),
-
-            "doi":
-                doi,
-
-            "url":
-                item.get(
-                    "URL"
-                )
-                or
-                (
-                    f"https://doi.org/{doi}"
-                    if doi
-                    else None
+                "doi": doi,
+                "url": (
+                    item.get(
+                        "URL"
+                    )
+                    or (
+                        f"https://doi.org/{doi}"
+                        if doi
+                        else None
+                    )
                 ),
-
-        })
-
-    # ========================================================
-    # DEDUPLICATE
-    # ========================================================
-
-    unique = []
-
-    seen = set()
-
-    for item in results:
-
-        key = (
-
-            item.get(
-                "doi"
-            )
-
-            or
-
-            item.get(
-                "url"
-            )
-
-            or
-
-            item.get(
-                "title"
-            )
-
-            or
-            ""
-
-        ).lower()
-
-        if (
-            not key
-            or
-            key in seen
-        ):
-
-            continue
-
-        seen.add(
-            key
+                "query": query,
+            }
         )
 
-        unique.append(
-            item
-        )
+    return results
 
-    unique.sort(
 
-        key=lambda item:
-            item.get(
-                "citations",
-                0,
-            ),
+def direct_links(
+    query: str,
+) -> dict:
 
-        reverse=True,
-
+    encoded = quote(
+        query
     )
 
-    return unique
+    return {
+        "google_scholar": (
+            "https://scholar.google.com/"
+            f"scholar?q={encoded}"
+        ),
+        "google_patents": (
+            "https://patents.google.com/"
+            f"?q={encoded}"
+        ),
+        "semantic_scholar": (
+            "https://www.semanticscholar.org/"
+            f"search?q={encoded}"
+        ),
+        "wipo": (
+            "https://patentscope.wipo.int/"
+            "search/en/result.jsf"
+            f"?query={encoded}"
+        ),
+    }
+
+
+async def research_dossier(
+    dossier: dict,
+) -> dict:
+
+    queries = build_queries(
+        dossier
+    )
+
+    evidence = []
+
+    # Keep this deliberately limited.
+    # Eight queries x multiple providers can
+    # otherwise become painfully slow on free Render.
+
+    for query in queries[:5]:
+
+        try:
+
+            openalex = await search_openalex(
+                query,
+                4,
+            )
+
+        except Exception:
+
+            openalex = []
+
+        try:
+
+            crossref = await search_crossref(
+                query,
+                4,
+            )
+
+        except Exception:
+
+            crossref = []
+
+        evidence.append(
+            {
+                "query": query,
+                "links": direct_links(
+                    query
+                ),
+                "papers": (
+                    openalex
+                    +
+                    crossref
+                ),
+            }
+        )
+
+        await asyncio.sleep(
+            0.3
+        )
+
+    return {
+        "queries": queries,
+        "evidence": evidence,
+    }
