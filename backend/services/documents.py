@@ -2,10 +2,6 @@ from pathlib import Path
 import re
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 SECTION_NAMES = [
     "scientific abstract",
     "abstract",
@@ -32,7 +28,8 @@ SECTION_NAMES = [
 
 
 TECHNICAL_PATTERNS = [
-    r"\bmembrane(?:s)?\b",
+    r"\bceramic membranes?\b",
+    r"\bmembranes?\b",
     r"\bdesalination\b",
     r"\bwastewater\b",
     r"\bwater treatment\b",
@@ -41,7 +38,6 @@ TECHNICAL_PATTERNS = [
     r"\bultrafiltration\b",
     r"\bmicrofiltration\b",
     r"\bnanofiltration\b",
-    r"\bceramic membrane(?:s)?\b",
     r"\banaerobic\b",
     r"\belectrolysis\b",
     r"\belectrochemical\b",
@@ -65,9 +61,9 @@ CLAIM_PATTERN = re.compile(
     r"improvement|"
     r"increase|"
     r"increased|"
+    r"reduction|"
     r"reduce|"
     r"reduced|"
-    r"reduction|"
     r"achieve|"
     r"achieved|"
     r"target|"
@@ -107,18 +103,12 @@ KPI_PATTERN = re.compile(
 )
 
 
-# ============================================================
-# DOCUMENT ROUTER
-# ============================================================
-
 def parse_document(
     path: str,
     filename: str,
 ) -> dict:
 
-    suffix = Path(
-        filename
-    ).suffix.lower()
+    suffix = Path(filename).suffix.lower()
 
     if suffix == ".pdf":
         return parse_pdf(
@@ -142,13 +132,10 @@ def parse_document(
         )
 
     raise ValueError(
-        "Supported formats: PDF, DOCX, TXT, MD"
+        "Unsupported document type. "
+        "Please upload PDF, DOCX, TXT or MD."
     )
 
-
-# ============================================================
-# PDF
-# ============================================================
 
 def parse_pdf(
     path: str,
@@ -157,11 +144,10 @@ def parse_pdf(
 
     import pymupdf
 
-    document = pymupdf.open(
-        path
-    )
+    document = pymupdf.open(path)
 
     pages = []
+    total_chars = 0
 
     try:
 
@@ -170,18 +156,76 @@ def parse_pdf(
             start=1,
         ):
 
+            # ------------------------------------------------
+            # First extraction mode
+            # ------------------------------------------------
+
             text = (
-                page
-                .get_text("text")
+                page.get_text(
+                    "text",
+                    sort=True,
+                )
                 or ""
             ).strip()
+
+            # ------------------------------------------------
+            # Fallback extraction
+            # ------------------------------------------------
+
+            if len(text) < 20:
+
+                blocks = (
+                    page.get_text(
+                        "blocks"
+                    )
+                    or []
+                )
+
+                block_text = []
+
+                for block in blocks:
+
+                    if len(block) >= 5:
+
+                        value = str(
+                            block[4]
+                        ).strip()
+
+                        if value:
+
+                            block_text.append(
+                                value
+                            )
+
+                fallback_text = "\n".join(
+                    block_text
+                ).strip()
+
+                if len(fallback_text) > len(text):
+
+                    text = fallback_text
+
+            text_length = len(text)
+
+            total_chars += text_length
 
             pages.append(
                 {
                     "page": page_number,
                     "text": text,
+                    "text_length": text_length,
                     "needs_visual_review": (
-                        len(text) < 200
+                        text_length < 200
+                    ),
+                    "has_images": bool(
+                        page.get_images(
+                            full=True
+                        )
+                    ),
+                    "image_count": len(
+                        page.get_images(
+                            full=True
+                        )
                     ),
                 }
             )
@@ -190,22 +234,41 @@ def parse_pdf(
 
         document.close()
 
+    if not pages:
+
+        raise ValueError(
+            "The PDF contains no pages."
+        )
+
+    scanned_pages = [
+        page["page"]
+        for page in pages
+        if page["text_length"] < 200
+    ]
+
+    # If almost everything has no text layer,
+    # the PDF is probably scanned/image-based.
+    scanned_document = (
+        total_chars < max(
+            500,
+            len(pages) * 100
+        )
+    )
+
     return {
         "filename": filename,
         "text": "\n\n".join(
             page["text"]
             for page in pages
+            if page["text"]
         ),
         "pages": pages,
-        "page_count": len(
-            pages
-        ),
+        "page_count": len(pages),
+        "scanned_document": scanned_document,
+        "scanned_pages": scanned_pages,
+        "total_characters": total_chars,
     }
 
-
-# ============================================================
-# DOCX
-# ============================================================
 
 def parse_docx(
     path: str,
@@ -223,12 +286,12 @@ def parse_docx(
     for paragraph in document.paragraphs:
 
         text = (
-            paragraph
-            .text
+            paragraph.text
             .strip()
         )
 
         if text:
+
             blocks.append(
                 text
             )
@@ -242,7 +305,7 @@ def parse_docx(
                 for cell in row.cells
             )
 
-            if row_text.strip():
+            if row_text:
 
                 blocks.append(
                     row_text
@@ -259,16 +322,18 @@ def parse_docx(
             {
                 "page": 1,
                 "text": text,
+                "text_length": len(text),
                 "needs_visual_review": False,
+                "has_images": False,
+                "image_count": 0,
             }
         ],
         "page_count": None,
+        "scanned_document": False,
+        "scanned_pages": [],
+        "total_characters": len(text),
     }
 
-
-# ============================================================
-# TXT / MARKDOWN
-# ============================================================
 
 def parse_text(
     path: str,
@@ -289,23 +354,25 @@ def parse_text(
             {
                 "page": 1,
                 "text": text,
+                "text_length": len(text),
                 "needs_visual_review": False,
+                "has_images": False,
+                "image_count": 0,
             }
         ],
         "page_count": 1,
+        "scanned_document": False,
+        "scanned_pages": [],
+        "total_characters": len(text),
     }
 
-
-# ============================================================
-# TITLE EXTRACTION
-# ============================================================
 
 def extract_title(
     text: str,
     filename: str,
 ) -> str:
 
-    title_patterns = [
+    patterns = [
         (
             r"(?:"
             r"title of research project|"
@@ -318,7 +385,7 @@ def extract_title(
         ),
     ]
 
-    for pattern in title_patterns:
+    for pattern in patterns:
 
         match = re.search(
             pattern,
@@ -328,19 +395,16 @@ def extract_title(
 
         if match:
 
-            candidate = (
-                match
-                .group(1)
+            title = (
+                match.group(
+                    1
+                )
                 .strip()
             )
 
-            if candidate:
-                return candidate
+            if title:
 
-    # --------------------------------------------------------
-    # Fallback:
-    # use the first substantial line.
-    # --------------------------------------------------------
+                return title
 
     for line in text.splitlines():
 
@@ -353,16 +417,13 @@ def extract_title(
             15 <= len(clean) <= 180
             and not clean.startswith("[")
         ):
+
             return clean
 
     return Path(
         filename
     ).stem
 
-
-# ============================================================
-# TECHNICAL CONCEPT EXTRACTION
-# ============================================================
 
 def extract_concepts(
     text: str,
@@ -380,23 +441,17 @@ def extract_concepts(
 
         for match in matches:
 
-            if isinstance(
-                match,
-                tuple,
-            ):
-
-                concept = (
-                    match[0]
-                    if match
-                    else ""
+            concept = (
+                match
+                if isinstance(
+                    match,
+                    str,
                 )
-
-            else:
-
-                concept = match
+                else match[0]
+            )
 
             concept = (
-                str(concept)
+                concept
                 .strip()
                 .lower()
             )
@@ -413,10 +468,6 @@ def extract_concepts(
     return concepts[:15]
 
 
-# ============================================================
-# PAGE ANALYSIS
-# ============================================================
-
 def analyze_page(
     page: dict,
 ) -> dict:
@@ -428,10 +479,6 @@ def analyze_page(
 
     lower = text.lower()
 
-    # --------------------------------------------------------
-    # Sections
-    # --------------------------------------------------------
-
     sections = []
 
     for section in SECTION_NAMES:
@@ -439,8 +486,7 @@ def analyze_page(
         if section in lower:
 
             display_name = (
-                section
-                .title()
+                section.title()
             )
 
             if (
@@ -452,24 +498,11 @@ def analyze_page(
                     display_name
                 )
 
-    # --------------------------------------------------------
-    # Technical concepts
-    # --------------------------------------------------------
-
     concepts = extract_concepts(
         text
     )
 
-    # --------------------------------------------------------
-    # Claims
-    # --------------------------------------------------------
-
     claims = []
-
-    # --------------------------------------------------------
-    # KPIs
-    # --------------------------------------------------------
-
     kpis = []
 
     for line in text.splitlines():
@@ -480,11 +513,8 @@ def analyze_page(
         )
 
         if len(clean) < 30:
-            continue
 
-        # ----------------------------------------------------
-        # Claim signal
-        # ----------------------------------------------------
+            continue
 
         if CLAIM_PATTERN.search(
             clean
@@ -495,10 +525,6 @@ def analyze_page(
                 claims.append(
                     clean
                 )
-
-        # ----------------------------------------------------
-        # KPI signal
-        # ----------------------------------------------------
 
         if KPI_PATTERN.search(
             clean
@@ -514,6 +540,7 @@ def analyze_page(
             len(claims) >= 8
             and len(kpis) >= 8
         ):
+
             break
 
     return {
@@ -528,17 +555,21 @@ def analyze_page(
             "needs_visual_review",
             False,
         ),
+        "has_images": page.get(
+            "has_images",
+            False,
+        ),
+        "image_count": page.get(
+            "image_count",
+            0,
+        ),
         "text_preview": (
-            text[:1200]
+            text[:1500]
             if text
             else ""
         ),
     }
 
-
-# ============================================================
-# FULL DOCUMENT DOSSIER
-# ============================================================
 
 def build_document_dossier(
     parsed: dict,
@@ -554,18 +585,21 @@ def build_document_dossier(
         "proposal",
     )
 
-    # --------------------------------------------------------
-    # Title
-    # --------------------------------------------------------
+    if not text.strip():
+
+        raise ValueError(
+
+            "No readable text was extracted "
+            "from this document. This PDF may "
+            "be scanned or image-only. "
+            "Visual/OCR processing is required."
+
+        )
 
     title = extract_title(
         text,
         filename,
     )
-
-    # --------------------------------------------------------
-    # Analyse every page
-    # --------------------------------------------------------
 
     page_analysis = [
         analyze_page(
@@ -573,37 +607,22 @@ def build_document_dossier(
         )
         for page in parsed.get(
             "pages",
-            []
+            [],
         )
     ]
 
-    # --------------------------------------------------------
-    # Aggregate document-level information
-    # --------------------------------------------------------
-
     concepts = []
-
     claims = []
-
     kpis = []
-
     sections = []
 
     visual_review_pages = []
-
-    # --------------------------------------------------------
-    # Page aggregation
-    # --------------------------------------------------------
 
     for page in page_analysis:
 
         page_number = page.get(
             "page"
         )
-
-        # ----------------------------------------------------
-        # Concepts
-        # ----------------------------------------------------
 
         for concept in page.get(
             "concepts",
@@ -616,10 +635,6 @@ def build_document_dossier(
                     concept
                 )
 
-        # ----------------------------------------------------
-        # Claims
-        # ----------------------------------------------------
-
         for claim in page.get(
             "claims",
             [],
@@ -627,14 +642,13 @@ def build_document_dossier(
 
             claims.append(
                 {
-                    "page": page_number,
-                    "text": claim,
+                    "page":
+                        page_number,
+
+                    "text":
+                        claim,
                 }
             )
-
-        # ----------------------------------------------------
-        # KPIs
-        # ----------------------------------------------------
 
         for kpi in page.get(
             "kpis",
@@ -643,14 +657,13 @@ def build_document_dossier(
 
             kpis.append(
                 {
-                    "page": page_number,
-                    "text": kpi,
+                    "page":
+                        page_number,
+
+                    "text":
+                        kpi,
                 }
             )
-
-        # ----------------------------------------------------
-        # Sections
-        # ----------------------------------------------------
 
         for section in page.get(
             "sections",
@@ -659,14 +672,13 @@ def build_document_dossier(
 
             sections.append(
                 {
-                    "page": page_number,
-                    "name": section,
+                    "page":
+                        page_number,
+
+                    "name":
+                        section,
                 }
             )
-
-        # ----------------------------------------------------
-        # Visual review
-        # ----------------------------------------------------
 
         if page.get(
             "needs_visual_review",
@@ -676,10 +688,6 @@ def build_document_dossier(
             visual_review_pages.append(
                 page_number
             )
-
-    # --------------------------------------------------------
-    # Remove duplicate claims
-    # --------------------------------------------------------
 
     unique_claims = []
 
@@ -700,6 +708,7 @@ def build_document_dossier(
             not key
             or key in seen_claims
         ):
+
             continue
 
         seen_claims.add(
@@ -709,10 +718,6 @@ def build_document_dossier(
         unique_claims.append(
             claim
         )
-
-    # --------------------------------------------------------
-    # Remove duplicate KPIs
-    # --------------------------------------------------------
 
     unique_kpis = []
 
@@ -733,6 +738,7 @@ def build_document_dossier(
             not key
             or key in seen_kpis
         ):
+
             continue
 
         seen_kpis.add(
@@ -742,10 +748,6 @@ def build_document_dossier(
         unique_kpis.append(
             kpi
         )
-
-    # --------------------------------------------------------
-    # Remove duplicate section/page combinations
-    # --------------------------------------------------------
 
     unique_sections = []
 
@@ -763,6 +765,7 @@ def build_document_dossier(
         )
 
         if key in seen_sections:
+
             continue
 
         seen_sections.add(
@@ -772,10 +775,6 @@ def build_document_dossier(
         unique_sections.append(
             section
         )
-
-    # --------------------------------------------------------
-    # Result
-    # --------------------------------------------------------
 
     return {
 
@@ -790,6 +789,24 @@ def build_document_dossier(
             "pages":
                 parsed.get(
                     "page_count"
+                ),
+
+            "total_characters":
+                parsed.get(
+                    "total_characters",
+                    len(text),
+                ),
+
+            "scanned_document":
+                parsed.get(
+                    "scanned_document",
+                    False,
+                ),
+
+            "scanned_pages":
+                parsed.get(
+                    "scanned_pages",
+                    [],
                 ),
 
             "visual_review_pages":
