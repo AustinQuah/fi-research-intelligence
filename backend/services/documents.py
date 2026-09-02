@@ -3,30 +3,22 @@ import re
 
 
 CLAIM_WORDS = re.compile(
-    r"\b("
-    r"novel|innovative|improve|improved|improvement|"
-    r"increase|increased|reduce|reduced|reduction|"
-    r"enhance|enhanced|higher|lower|target|achieve|"
-    r"achieved|demonstrate|demonstrated|performance|"
-    r"efficiency|efficient|optimise|optimize"
-    r")\b",
+    r"\b(?:novel|innovative|improve|improved|improvement|"
+    r"increase|increased|reduce|reduced|reduction|enhance|"
+    r"enhanced|higher|lower|target|achieve|achieved|"
+    r"demonstrate|demonstrated|performance|efficiency|"
+    r"efficient|optimise|optimize)\b",
     re.IGNORECASE,
 )
-
 
 KPI_PATTERN = re.compile(
-    r"("
-    r"\d+(?:\.\d+)?\s*%|"
+    r"(?:\d+(?:\.\d+)?\s*%|"
     r"\$\s*\d+(?:\.\d+)?\s*[mkb]?|"
-    r"\d+(?:\.\d+)?\s*"
-    r"(?:mg/l|g/l|kg/m3|m3/day|m³/day|"
-    r"kwh|kw|mw|ppm|ppb|bar)|"
-    r"trl\s*\d+|"
-    r"target\s*:\s*[^\n]+"
-    r")",
+    r"\d+(?:\.\d+)?\s*(?:mg/l|g/l|kg/m3|m3/day|m³/day|"
+    r"kwh|kw|mw|ppm|ppb|bar)|trl\s*\d+|"
+    r"target\s*:\s*[^\n]+)",
     re.IGNORECASE,
 )
-
 
 CONCEPT_PATTERNS = [
     r"\bceramic membranes?\b",
@@ -60,7 +52,6 @@ CONCEPT_PATTERNS = [
     r"\bsemiconductors?\b",
     r"\bwafer fabs?\b",
 ]
-
 
 SECTION_NAMES = [
     "executive summary",
@@ -113,13 +104,21 @@ def parse_pdf(path: str, filename: str) -> dict:
     pages = []
 
     try:
-        for page_number, page in enumerate(document, start=1):
+        for page_number, page in enumerate(
+            document,
+            start=1,
+        ):
             text = (
-                page.get_text("text", sort=True)
+                page.get_text(
+                    "text",
+                    sort=True,
+                )
                 or ""
             ).strip()
 
-            images = page.get_images(full=True)
+            images = page.get_images(
+                full=True
+            )
 
             pages.append(
                 {
@@ -131,11 +130,9 @@ def parse_pdf(path: str, filename: str) -> dict:
                     "needs_visual_review": len(text) < 150,
                 }
             )
+
     finally:
         document.close()
-
-    if not pages:
-        raise ValueError("The PDF contains no pages.")
 
     full_text = "\n\n".join(
         page["text"]
@@ -151,7 +148,10 @@ def parse_pdf(path: str, filename: str) -> dict:
 
     scanned_document = (
         len(full_text.strip())
-        < max(300, len(pages) * 80)
+        < max(
+            300,
+            len(pages) * 80,
+        )
     )
 
     return {
@@ -232,25 +232,23 @@ def parse_text(path: str, filename: str) -> dict:
     }
 
 
-def extract_title(text: str, filename: str) -> str:
-    patterns = [
-        (
-            r"(?:proposal title|project title|"
-            r"research project title|"
-            r"title of research project)"
-            r"\s*[:\-]?\s*([^\n]{8,200})"
-        )
-    ]
+def extract_title(
+    text: str,
+    filename: str,
+) -> str:
+    pattern = (
+        r"(?:proposal title|project title|research project title|"
+        r"title of research project)\s*[:\-]?\s*([^\n]{8,200})"
+    )
 
-    for pattern in patterns:
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE,
-        )
+    match = re.search(
+        pattern,
+        text,
+        re.IGNORECASE,
+    )
 
-        if match:
-            return match.group(1).strip()
+    if match:
+        return match.group(1).strip()
 
     for line in text.splitlines():
         line = line.strip()
@@ -261,29 +259,41 @@ def extract_title(text: str, filename: str) -> str:
     return Path(filename).stem
 
 
-def extract_concepts(text: str) -> list[str]:
+def extract_concepts(
+    text: str,
+) -> list[str]:
     found = []
 
     for pattern in CONCEPT_PATTERNS:
-        matches = re.findall(
+        for match in re.findall(
             pattern,
             text,
             re.IGNORECASE,
-        )
+        ):
+            value = (
+                str(match)
+                .strip()
+                .lower()
+            )
 
-        for match in matches:
-            value = str(match).strip().lower()
-
-            if value and value not in found:
+            if (
+                value
+                and value not in found
+            ):
                 found.append(value)
 
     return found[:20]
 
 
-def analyse_page(page: dict) -> dict:
-    text = page.get("text", "")
-    lower = text.lower()
+def analyse_page(
+    page: dict,
+) -> dict:
+    text = page.get(
+        "text",
+        "",
+    )
 
+    lower = text.lower()
     sections = []
 
     for name in SECTION_NAMES:
@@ -294,7 +304,6 @@ def analyse_page(page: dict) -> dict:
                 sections.append(display)
 
     concepts = extract_concepts(text)
-
     claims = []
     kpis = []
 
@@ -304,13 +313,23 @@ def analyse_page(page: dict) -> dict:
         if len(line) < 20:
             continue
 
-        if CLAIM_WORDS.search(line):
-            if line not in claims:
-                claims.append(line)
+        if (
+            CLAIM_WORDS.search(line)
+            and line not in claims
+        ):
+            claims.append(line)
 
-        if KPI_PATTERN.search(line):
-            if line not in kpis:
-                kpis.append(line)
+        if (
+            KPI_PATTERN.search(line)
+            and line not in kpis
+        ):
+            kpis.append(line)
+
+        if (
+            len(claims) >= 10
+            and len(kpis) >= 10
+        ):
+            break
 
     return {
         "page": page["page"],
@@ -328,9 +347,46 @@ def analyse_page(page: dict) -> dict:
     }
 
 
-def build_document_dossier(parsed: dict) -> dict:
-    text = parsed.get("text", "")
-    filename = parsed.get("filename", "proposal")
+def deduplicate_items(
+    items: list[dict],
+) -> list[dict]:
+    result = []
+    seen = set()
+
+    for item in items:
+        text = (
+            item.get(
+                "text",
+                "",
+            )
+            .strip()
+            .lower()
+        )
+
+        if (
+            not text
+            or text in seen
+        ):
+            continue
+
+        seen.add(text)
+        result.append(item)
+
+    return result
+
+
+def build_document_dossier(
+    parsed: dict,
+) -> dict:
+    text = parsed.get(
+        "text",
+        "",
+    )
+
+    filename = parsed.get(
+        "filename",
+        "proposal",
+    )
 
     if not text.strip():
         return {
@@ -338,7 +394,9 @@ def build_document_dossier(parsed: dict) -> dict:
             "document": {
                 "filename": filename,
                 "title": Path(filename).stem,
-                "pages": parsed.get("page_count"),
+                "pages": parsed.get(
+                    "page_count"
+                ),
                 "scanned_document": True,
                 "scanned_pages": parsed.get(
                     "scanned_pages",
@@ -354,7 +412,10 @@ def build_document_dossier(parsed: dict) -> dict:
 
     page_analysis = [
         analyse_page(page)
-        for page in parsed.get("pages", [])
+        for page in parsed.get(
+            "pages",
+            [],
+        )
     ]
 
     concepts = []
@@ -401,7 +462,9 @@ def build_document_dossier(parsed: dict) -> dict:
                 text,
                 filename,
             ),
-            "pages": parsed.get("page_count"),
+            "pages": parsed.get(
+                "page_count"
+            ),
             "scanned_document": parsed.get(
                 "scanned_document",
                 False,
@@ -421,23 +484,3 @@ def build_document_dossier(parsed: dict) -> dict:
         "sections": sections,
         "page_analysis": page_analysis,
     }
-
-
-def deduplicate_items(items: list[dict]) -> list[dict]:
-    result = []
-    seen = set()
-
-    for item in items:
-        text = (
-            item.get("text", "")
-            .strip()
-            .lower()
-        )
-
-        if not text or text in seen:
-            continue
-
-        seen.add(text)
-        result.append(item)
-
-    return result
