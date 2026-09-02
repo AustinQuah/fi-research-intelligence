@@ -146,8 +146,16 @@ export default function App() {
       }
 
 
-      setProposal(data);
-
+      setProposal(
+        data
+      );
+      
+      setEvidence(
+        data.research?.evidence
+        ||
+        []
+      );
+            
       setStatus(
         "Proposal ready"
       );
