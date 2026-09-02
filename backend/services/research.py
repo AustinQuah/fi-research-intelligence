@@ -4,62 +4,10 @@ from urllib.parse import quote
 import httpx
 
 
-CACHE = {}
+CACHE: dict[str, dict] = {}
 
 
-async def get_json(
-    url: str,
-) -> dict:
-
-    if url in CACHE:
-        return CACHE[url]
-
-    async with httpx.AsyncClient(
-        timeout=25,
-        follow_redirects=True,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": (
-                "FI-Research-Intelligence/2.0"
-            ),
-        },
-    ) as client:
-
-        for attempt in range(4):
-
-            response = await client.get(
-                url
-            )
-
-            if response.status_code == 200:
-
-                data = response.json()
-
-                CACHE[url] = data
-
-                return data
-
-            if response.status_code == 429:
-
-                await asyncio.sleep(
-                    1.5 * (
-                        2 ** attempt
-                    )
-                )
-
-                continue
-
-            response.raise_for_status()
-
-    raise RuntimeError(
-        "Research provider unavailable."
-    )
-
-
-def build_queries(
-    dossier: dict,
-) -> list:
-
+def build_queries(dossier: dict) -> list[str]:
     concepts = dossier.get(
         "concepts",
         [],
@@ -67,41 +15,27 @@ def build_queries(
 
     queries = []
 
-    # Individual concepts
-
-    for concept in concepts[:8]:
-
-        queries.append(
-            concept
-        )
-
-    # Concept combinations are usually
-    # more useful than one giant title search.
-
-    if len(concepts) >= 2:
-
-        queries.append(
-            " ".join(
-                concepts[:2]
-            )
-        )
-
-    if len(concepts) >= 3:
-
+    if concepts:
         queries.append(
             " ".join(
                 concepts[:3]
             )
         )
 
-    # Claims can generate targeted
-    # literature questions.
+    for concept in concepts[:5]:
+        queries.append(concept)
 
-    for claim in dossier.get(
+    if len(concepts) >= 2:
+        queries.append(
+            f"{concepts[0]} {concepts[1]}"
+        )
+
+    claims = dossier.get(
         "claims",
         [],
-    )[:3]:
+    )
 
+    for claim in claims[:2]:
         text = claim.get(
             "text",
             "",
@@ -109,64 +43,96 @@ def build_queries(
 
         words = text.split()
 
-        if len(words) > 5:
-
+        if len(words) >= 5:
             queries.append(
                 " ".join(
-                    words[:14]
+                    words[:12]
                 )
             )
 
     clean = []
 
     for query in queries:
-
-        query = (
-            query
-            .strip()
-            .lower()
-        )
+        query = query.strip()
 
         if (
             query
-            and query not in clean
+            and query.lower()
+            not in {
+                value.lower()
+                for value in clean
+            }
         ):
+            clean.append(query)
 
-            clean.append(
-                query
-            )
+    return clean[:6]
 
-    return clean[:8]
+
+async def get_json(url: str) -> dict:
+    if url in CACHE:
+        return CACHE[url]
+
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": (
+            "FI-Research-Intelligence/3.0"
+        ),
+    }
+
+    async with httpx.AsyncClient(
+        timeout=15,
+        follow_redirects=True,
+        headers=headers,
+    ) as client:
+
+        for attempt in range(3):
+            try:
+                response = await client.get(url)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    CACHE[url] = data
+                    return data
+
+                if response.status_code == 429:
+                    await asyncio.sleep(
+                        1.5 * (attempt + 1)
+                    )
+                    continue
+
+                response.raise_for_status()
+
+            except httpx.HTTPError:
+                if attempt == 2:
+                    raise
+
+                await asyncio.sleep(
+                    0.75 * (attempt + 1)
+                )
+
+    raise RuntimeError(
+        "Research provider unavailable."
+    )
 
 
 async def search_openalex(
     query: str,
     limit: int = 5,
-) -> list:
+) -> list[dict]:
 
     url = (
         "https://api.openalex.org/works"
         f"?search={quote(query)}"
-        "&filter=from_publication_date:2018-01-01,"
-        "type:article|review"
+        "&filter=from_publication_date:2018-01-01"
         f"&per-page={limit}"
     )
 
-    data = await get_json(
-        url
-    )
-
+    data = await get_json(url)
     results = []
 
-    for item in data.get(
-        "results",
-        [],
-    ):
-
+    for item in data.get("results", []):
         location = (
-            item.get(
-                "primary_location"
-            )
+            item.get("primary_location")
             or {}
         )
 
@@ -174,9 +140,7 @@ async def search_openalex(
             {
                 "source": "OpenAlex",
                 "title": (
-                    item.get(
-                        "title"
-                    )
+                    item.get("title")
                     or "Untitled"
                 ),
                 "year": item.get(
@@ -186,21 +150,14 @@ async def search_openalex(
                     "cited_by_count",
                     0,
                 ),
-                "doi": item.get(
-                    "doi"
-                ),
+                "doi": item.get("doi"),
                 "url": (
                     location.get(
                         "landing_page_url"
                     )
-                    or item.get(
-                        "doi"
-                    )
-                    or item.get(
-                        "id"
-                    )
+                    or item.get("doi")
+                    or item.get("id")
                 ),
-                "query": query,
             }
         )
 
@@ -210,7 +167,7 @@ async def search_openalex(
 async def search_crossref(
     query: str,
     limit: int = 5,
-) -> list:
+) -> list[dict]:
 
     url = (
         "https://api.crossref.org/works"
@@ -219,86 +176,62 @@ async def search_crossref(
         f"&rows={limit}"
     )
 
-    data = await get_json(
-        url
+    data = await get_json(url)
+
+    items = (
+        data.get("message", {})
+        .get("items", [])
     )
 
     results = []
 
-    for item in (
-        data
-        .get(
-            "message",
-            {},
-        )
-        .get(
-            "items",
-            [],
-        )
-    ):
-
-        title_list = (
-            item.get(
-                "title"
-            )
-            or
-            ["Untitled"]
+    for item in items:
+        titles = (
+            item.get("title")
+            or ["Untitled"]
         )
 
-        doi = item.get(
-            "DOI"
-        )
+        doi = item.get("DOI")
 
         date_parts = (
-            item
-            .get(
-                "published",
-                {},
-            )
+            item.get("published", {})
             .get(
                 "date-parts",
                 [[None]],
             )
         )
 
+        year = None
+
+        if date_parts and date_parts[0]:
+            year = date_parts[0][0]
+
         results.append(
             {
                 "source": "Crossref",
-                "title": title_list[0],
-                "year": (
-                    date_parts[0][0]
-                    if date_parts
-                    else None
-                ),
+                "title": titles[0],
+                "year": year,
                 "citations": item.get(
                     "is-referenced-by-count",
                     0,
                 ),
                 "doi": doi,
                 "url": (
-                    item.get(
-                        "URL"
-                    )
+                    item.get("URL")
                     or (
                         f"https://doi.org/{doi}"
                         if doi
                         else None
                     )
                 ),
-                "query": query,
             }
         )
 
     return results
 
 
-def direct_links(
-    query: str,
-) -> dict:
-
-    encoded = quote(
-        query
-    )
+def make_links(query: str) -> dict:
+    encoded = quote(query)
 
     return {
         "google_scholar": (
@@ -321,7 +254,78 @@ def direct_links(
     }
 
 
-async def research_dossier(
+async def research_query(
+    query: str,
+) -> dict:
+
+    openalex_results = []
+    crossref_results = []
+
+    errors = []
+
+    try:
+        openalex_results = (
+            await search_openalex(
+                query,
+                5,
+            )
+        )
+    except Exception as error:
+        errors.append(
+            f"OpenAlex: {error}"
+        )
+
+    try:
+        crossref_results = (
+            await search_crossref(
+                query,
+                5,
+            )
+        )
+    except Exception as error:
+        errors.append(
+            f"Crossref: {error}"
+        )
+
+    combined = (
+        openalex_results
+        + crossref_results
+    )
+
+    unique = []
+    seen = set()
+
+    for item in combined:
+        key = (
+            item.get("doi")
+            or item.get("url")
+            or item.get("title")
+            or ""
+        ).lower()
+
+        if not key or key in seen:
+            continue
+
+        seen.add(key)
+        unique.append(item)
+
+    unique.sort(
+        key=lambda item: item.get(
+            "citations",
+            0,
+        ),
+        reverse=True,
+    )
+
+    return {
+        "query": query,
+        "links": make_links(query),
+        "papers": unique[:10],
+        "errors": errors,
+    }
+
+
+async def run_research(
     dossier: dict,
 ) -> dict:
 
@@ -331,53 +335,15 @@ async def research_dossier(
 
     evidence = []
 
-    # Keep this deliberately limited.
-    # Eight queries x multiple providers can
-    # otherwise become painfully slow on free Render.
-
-    for query in queries[:5]:
-
-        try:
-
-            openalex = await search_openalex(
-                query,
-                4,
-            )
-
-        except Exception:
-
-            openalex = []
-
-        try:
-
-            crossref = await search_crossref(
-                query,
-                4,
-            )
-
-        except Exception:
-
-            crossref = []
-
-        evidence.append(
-            {
-                "query": query,
-                "links": direct_links(
-                    query
-                ),
-                "papers": (
-                    openalex
-                    +
-                    crossref
-                ),
-            }
+    for query in queries:
+        result = await research_query(
+            query
         )
 
-        await asyncio.sleep(
-            0.3
-        )
+        evidence.append(result)
 
     return {
+        "status": "complete",
         "queries": queries,
         "evidence": evidence,
     }
