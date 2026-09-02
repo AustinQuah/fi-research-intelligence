@@ -1,7 +1,6 @@
 import React, {
   useEffect,
-  useMemo,
-  useState,
+  useState
 } from "react";
 
 import {
@@ -9,9 +8,8 @@ import {
   ArrowUpRight,
   BookOpen,
   CheckCircle2,
-  FileSearch,
+  ChevronRight,
   FileText,
-  FlaskConical,
   Gauge,
   Loader2,
   Search,
@@ -24,49 +22,55 @@ const API =
   "https://fi-research-intelligence-2.onrender.com/api";
 
 
-const NAVIGATION = [
-  {
-    id: "overview",
-    label: "Overview",
-    icon: Gauge,
-  },
-  {
-    id: "document",
-    label: "Document",
-    icon: FileText,
-  },
-  {
-    id: "research",
-    label: "Research",
-    icon: BookOpen,
-  },
-  {
-    id: "review",
-    label: "Review",
-    icon: ShieldCheck,
-  },
+const NAV = [
+  [
+    "overview",
+    "Overview",
+    Gauge
+  ],
+  [
+    "document",
+    "Document",
+    FileText
+  ],
+  [
+    "research",
+    "Research & IP",
+    BookOpen
+  ],
+  [
+    "novelty",
+    "Novelty",
+    ShieldCheck
+  ],
 ];
 
 
 export default function App() {
   const [
     page,
-    setPage,
-  ] = useState("overview");
+    setPage
+  ] = useState(
+    "overview"
+  );
 
   const [
     documentId,
-    setDocumentId,
-  ] = useState(null);
+    setDocumentId
+  ] = useState(
+    null
+  );
 
   const [
     dossier,
-    setDossier,
-  ] = useState(null);
+    setDossier
+  ] = useState(
+    null
+  );
 
   const [
     research,
-    setResearch,
+    setResearch
   ] = useState({
     status: "not_started",
     queries: [],
@@ -74,22 +78,28 @@ export default function App() {
   });
 
   const [
-    uploadStatus,
-    setUploadStatus,
-  ] = useState("idle");
+    novelty,
+    setNovelty
+  ] = useState(
+    null
+  );
+
+  const [
+    busy,
+    setBusy
+  ] = useState(
+    false
+  );
 
   const [
     message,
-    setMessage,
-  ] = useState("");
-
-  const [
-    researchStarted,
-    setResearchStarted,
-  ] = useState(false);
+    setMessage
+  ] = useState(
+    ""
+  );
 
 
-  async function apiRequest(
+  async function request(
     url,
     options = {},
   ) {
@@ -98,13 +108,12 @@ export default function App() {
     try {
       response = await fetch(
         url,
-        options,
+        options
       );
-    } catch (error) {
+
+    } catch {
       throw new Error(
-        "Could not reach the research server. "
-        + "The Render backend may be sleeping "
-        + "or unavailable."
+        "Could not reach the Render research server."
       );
     }
 
@@ -112,30 +121,30 @@ export default function App() {
 
     try {
       data = await response.json();
+
     } catch {
       data = null;
     }
 
     if (!response.ok) {
-      const detail =
+      throw new Error(
         data?.detail
-        || `Server returned HTTP ${response.status}.`;
-
-      throw new Error(detail);
+        || `Server returned HTTP ${response.status}.`
+      );
     }
 
     return data;
   }
 
 
-  async function uploadProposal(file) {
+  async function uploadProposal(
+    file
+  ) {
     if (!file) {
       return;
     }
 
-    setUploadStatus(
-      "uploading"
-    );
+    setBusy(true);
 
     setMessage(
       "Uploading proposal..."
@@ -143,7 +152,7 @@ export default function App() {
 
     setDossier(null);
 
-    setDocumentId(null);
+    setNovelty(null);
 
     setResearch({
       status: "not_started",
@@ -151,24 +160,22 @@ export default function App() {
       evidence: [],
     });
 
-    setResearchStarted(false);
-
-    const form =
+    const body =
       new FormData();
 
-    form.append(
+    body.append(
       "file",
-      file,
+      file
     );
 
     try {
       const result =
-        await apiRequest(
+        await request(
           `${API}/proposals/upload`,
           {
             method: "POST",
-            body: form,
-          },
+            body,
+          }
         );
 
       setDocumentId(
@@ -179,12 +186,8 @@ export default function App() {
         result.document
       );
 
-      setUploadStatus(
-        "ready"
-      );
-
       setMessage(
-        "Document analysed."
+        "Proposal received. Research is running in the background."
       );
 
       setPage(
@@ -192,138 +195,74 @@ export default function App() {
       );
 
     } catch (error) {
-      setUploadStatus(
-        "error"
-      );
-
       setMessage(
         error.message
       );
-    }
-  }
 
-
-  async function beginResearch() {
-    if (
-      !documentId
-      || researchStarted
-    ) {
-      return;
-    }
-
-    setResearchStarted(
-      true
-    );
-
-    setResearch({
-      status: "running",
-      queries: [],
-      evidence: [],
-    });
-
-    try {
-      await apiRequest(
-        `${API}/proposals/${documentId}/research`,
-        {
-          method: "POST",
-        },
-      );
-
-    } catch (error) {
-      setResearchStarted(
-        false
-      );
-
-      setResearch({
-        status: "error",
-        queries: [],
-        evidence: [],
-        error: error.message,
-      });
-
-      setMessage(
-        error.message
-      );
+    } finally {
+      setBusy(false);
     }
   }
 
 
   useEffect(() => {
-    if (
-      dossier
-      && documentId
-      && !researchStarted
-    ) {
-      beginResearch();
-    }
-  }, [
-    dossier,
-    documentId,
-    researchStarted,
-  ]);
-
-
-  useEffect(() => {
-    if (
-      !documentId
-      || research.status !== "running"
-    ) {
+    if (!documentId) {
       return;
     }
 
-    const timer =
-      window.setInterval(
-        async () => {
-          try {
-            const result =
-              await apiRequest(
-                `${API}/proposals/${documentId}/research`
-              );
+    let cancelled = false;
 
-            setResearch(
-              result
-            );
+    const poll = async () => {
+      try {
+        const result =
+          await request(
+            `${API}/proposals/${documentId}`
+          );
 
-            if (
-              result.status
-              === "complete"
-            ) {
-              setMessage(
-                "Research complete."
-              );
-            }
+        if (cancelled) {
+          return;
+        }
 
-          } catch (error) {
-            setResearch({
-              status: "error",
-              queries: [],
-              evidence: [],
-              error: error.message,
-            });
+        setDossier(
+          result.dossier
+        );
 
-            setMessage(
-              error.message
-            );
-          }
-        },
-        2000,
-      );
+        setResearch(
+          result.research
+        );
+
+        setNovelty(
+          result.novelty
+        );
+
+        if (
+          result.research?.status
+          === "running"
+        ) {
+          setTimeout(
+            poll,
+            2000
+          );
+        }
+
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(
+            error.message
+          );
+        }
+      }
+    };
+
+    poll();
 
     return () => {
-      window.clearInterval(
-        timer
-      );
+      cancelled = true;
     };
 
   }, [
-    documentId,
-    research.status,
+    documentId
   ]);
-
-
-  const title =
-    dossier?.document?.title
-    || "No proposal loaded";
 
 
   return (
@@ -334,7 +273,9 @@ export default function App() {
         <div className="brand">
 
           <div className="brand-mark">
-            <Activity size={18} />
+            <Activity
+              size={18}
+            />
           </div>
 
           <div>
@@ -351,89 +292,93 @@ export default function App() {
 
 
         <nav>
-          {NAVIGATION.map(
-            item => {
-              const Icon =
-                item.icon;
 
-              return (
-                <button
-                  key={item.id}
-                  className={
-                    page === item.id
-                      ? "nav-item active"
-                      : "nav-item"
-                  }
-                  onClick={() =>
-                    setPage(
-                      item.id
-                    )
-                  }
-                >
-                  <Icon size={17} />
+          {NAV.map(
+            (
+              [
+                id,
+                label,
+                Icon
+              ]
+            ) => (
+              <button
+                key={id}
+                className={
+                  page === id
+                    ? "nav active"
+                    : "nav"
+                }
+                onClick={() =>
+                  setPage(id)
+                }
+              >
+                <Icon
+                  size={16}
+                />
 
-                  <span>
-                    {item.label}
-                  </span>
-                </button>
-              );
-            }
+                <span>
+                  {label}
+                </span>
+
+                {page === id && (
+                  <ChevronRight
+                    size={13}
+                    className="nav-arrow"
+                  />
+                )}
+
+              </button>
+            )
           )}
+
         </nav>
 
 
         <div className="server-status">
+
           <CheckCircle2
             size={14}
           />
 
-          Render API
+          Backend connected
+
         </div>
 
       </aside>
 
 
-      <main className="main">
+      <main>
 
         <header className="topbar">
 
           <div>
+
             <div className="eyebrow">
               RESEARCH WORKSPACE
             </div>
 
             <h1>
               {
-                NAVIGATION.find(
-                  item =>
-                    item.id === page
-                )?.label
+                NAV.find(
+                  ([id]) =>
+                    id === page
+                )?.[1]
               }
             </h1>
+
           </div>
 
 
           <div className="status-pill">
 
-            {uploadStatus ===
-              "uploading"
-              ? (
-                <>
-                  <Loader2
-                    size={13}
-                    className="spin"
-                  />
-                  Processing
-                </>
-              )
-              : (
-                <>
-                  <span
-                    className="status-dot"
-                  />
-                  Ready
-                </>
-              )
+            <span className="status-dot" />
+
+            {
+              busy
+                ? "Working"
+                : research.status === "running"
+                  ? "Researching"
+                  : "Ready"
             }
 
           </div>
@@ -443,6 +388,7 @@ export default function App() {
 
         {message && (
           <div className="toast">
+
             <span>
               {message}
             </span>
@@ -454,6 +400,7 @@ export default function App() {
             >
               ×
             </button>
+
           </div>
         )}
 
@@ -462,9 +409,8 @@ export default function App() {
           <Overview
             dossier={dossier}
             research={research}
-            uploadStatus={
-              uploadStatus
-            }
+            novelty={novelty}
+            busy={busy}
             uploadProposal={
               uploadProposal
             }
@@ -474,7 +420,7 @@ export default function App() {
 
 
         {page === "document" && (
-          <DocumentWorkspace
+          <DocumentPage
             dossier={dossier}
             setPage={setPage}
           />
@@ -482,16 +428,18 @@ export default function App() {
 
 
         {page === "research" && (
-          <ResearchWorkspace
+          <ResearchPage
             dossier={dossier}
             research={research}
           />
         )}
 
 
-        {page === "review" && (
-          <ReviewWorkspace
-            title={title}
+        {page === "novelty" && (
+          <NoveltyPage
+            novelty={novelty}
+            dossier={dossier}
+            research={research}
           />
         )}
 
@@ -505,7 +453,8 @@ export default function App() {
 function Overview({
   dossier,
   research,
-  uploadStatus,
+  novelty,
+  busy,
   uploadProposal,
   setPage,
 }) {
@@ -514,33 +463,34 @@ function Overview({
 
       <div className="hero">
 
-        <div className="hero-copy">
+        <div>
 
-          <span className="hero-label">
+          <div className="hero-label">
             PROPOSAL INTELLIGENCE
-          </span>
+          </div>
 
           <h2>
             Read the proposal.
             <br />
-            Investigate the evidence.
+            Investigate what already exists.
           </h2>
 
           <p>
-            Upload a technical proposal.
-            The workspace extracts its
-            structure, claims, KPIs and
-            research concepts, then starts
-            looking for related evidence.
+            Upload one proposal and let
+            the system extract its structure,
+            concepts, claims and KPIs,
+            then build a research evidence set.
           </p>
 
         </div>
 
 
         <div className="hero-symbol">
-          <FlaskConical
+
+          <ShieldCheck
             size={34}
           />
+
         </div>
 
       </div>
@@ -560,9 +510,7 @@ function Overview({
         <Stat
           label="Pages"
           value={
-            dossier
-              ?.document
-              ?.pages
+            dossier?.document?.pages
             ?? "—"
           }
         />
@@ -570,17 +518,17 @@ function Overview({
         <Stat
           label="Concepts"
           value={
-            dossier
-              ?.concepts
-              ?.length
+            dossier?.concepts?.length
             ?? 0
           }
         />
 
         <Stat
-          label="Research"
+          label="Novelty"
           value={
-            research.status
+            novelty?.score != null
+              ? `${novelty.score}/100`
+              : "Pending"
           }
         />
 
@@ -590,13 +538,15 @@ function Overview({
       <div className="section-heading">
 
         <div>
+
           <h3>
-            Start with a proposal
+            Start a research workspace
           </h3>
 
           <p>
             PDF, DOCX, TXT or Markdown.
           </p>
+
         </div>
 
       </div>
@@ -606,8 +556,7 @@ function Overview({
 
         <div className="upload-icon">
 
-          {uploadStatus ===
-            "uploading"
+          {busy
             ? (
               <Loader2
                 size={21}
@@ -628,17 +577,14 @@ function Overview({
 
           <strong>
             {
-              uploadStatus ===
-                "uploading"
+              busy
                 ? "Reading proposal..."
                 : "Choose a proposal"
             }
           </strong>
 
           <span>
-            Native text extraction first.
-            Sparse pages are flagged for
-            visual processing.
+            Document analysis starts immediately.
           </span>
 
         </div>
@@ -652,16 +598,11 @@ function Overview({
         <input
           type="file"
           accept=".pdf,.docx,.txt,.md"
-          disabled={
-            uploadStatus ===
-            "uploading"
-          }
+          disabled={busy}
           onChange={
-            event =>
+            (event) =>
               uploadProposal(
-                event
-                  .target
-                  .files?.[0]
+                event.target.files?.[0]
               )
           }
         />
@@ -672,27 +613,30 @@ function Overview({
       {dossier && (
         <div className="document-summary">
 
-          <div className="document-summary-main">
+          <div>
 
-            <span className="eyebrow">
+            <div className="eyebrow">
               CURRENT PROPOSAL
-            </span>
+            </div>
 
             <h3>
               {
-                dossier
-                  .document
-                  ?.title
+                dossier.document?.title
               }
             </h3>
 
             <p>
               {
-                dossier
-                  .concepts
-                  ?.slice(0, 6)
-                  .join(" · ")
-                || "No technical concepts detected."
+                (
+                  dossier.concepts
+                  || []
+                )
+                .slice(
+                  0,
+                  7
+                )
+                .join(" · ")
+                || "No concepts detected."
               }
             </p>
 
@@ -710,7 +654,7 @@ function Overview({
             >
               Document
               <ArrowUpRight
-                size={14}
+                size={13}
               />
             </button>
 
@@ -723,7 +667,20 @@ function Overview({
             >
               Research
               <Search
-                size={14}
+                size={13}
+              />
+            </button>
+
+            <button
+              onClick={() =>
+                setPage(
+                  "novelty"
+                )
+              }
+            >
+              Novelty
+              <ShieldCheck
+                size={13}
               />
             </button>
 
@@ -732,58 +689,78 @@ function Overview({
         </div>
       )}
 
+
+      {
+        dossier
+        && research.status === "running"
+        && (
+          <div className="progress-panel">
+
+            <Loader2
+              size={17}
+              className="spin"
+            />
+
+            <div>
+
+              <strong>
+                Research is running in the background
+              </strong>
+
+              <span>
+                Keep exploring the proposal
+                while evidence is collected.
+              </span>
+
+            </div>
+
+          </div>
+        )
+      }
+
     </section>
   );
 }
 
 
-function DocumentWorkspace({
+function DocumentPage({
   dossier,
   setPage,
 }) {
-  const [
-    selectedPage,
-    setSelectedPage,
-  ] = useState(1);
-
-
   if (!dossier) {
     return (
-      <EmptyState
-        icon={FileText}
+      <Empty
         title="No proposal loaded"
-        text={
-          "Upload a proposal from Overview first."
-        }
+        text="Upload a proposal from Overview."
       />
     );
   }
 
-
   if (
-    dossier.status ===
-    "needs_visual_processing"
+    dossier.status
+    === "needs_visual_processing"
   ) {
     return (
       <section className="workspace">
 
         <div className="warning-panel">
 
-          <FileSearch
-            size={24}
+          <FileText
+            size={22}
           />
 
           <div>
-            <h3>
-              Visual processing required
-            </h3>
+
+            <strong>
+              This document needs visual processing.
+            </strong>
 
             <p>
-              This document contains too
-              little native text to analyse
-              reliably. It is probably a
-              scanned or image-based PDF.
+              No usable native text layer was found.
+              The MVP flags scanned PDFs rather
+              than pretending they were read.
             </p>
+
           </div>
 
         </div>
@@ -793,37 +770,23 @@ function DocumentWorkspace({
   }
 
 
-  const pages =
-    dossier.page_analysis
-    || [];
-
-
-  const currentPage =
-    pages.find(
-      page =>
-        page.page ===
-        selectedPage
-    )
-    || pages[0];
-
-
   return (
     <section className="workspace">
 
       <div className="document-header">
 
         <div>
-          <span className="eyebrow">
-            PROPOSAL
-          </span>
+
+          <div className="eyebrow">
+            DOCUMENT
+          </div>
 
           <h2>
             {
-              dossier
-                .document
-                ?.title
+              dossier.document?.title
             }
           </h2>
+
         </div>
 
 
@@ -837,7 +800,7 @@ function DocumentWorkspace({
         >
           Investigate evidence
           <ArrowUpRight
-            size={14}
+            size={13}
           />
         </button>
 
@@ -846,62 +809,38 @@ function DocumentWorkspace({
 
       <div className="document-layout">
 
-        <aside className="page-list">
-
-          <div className="pane-title">
-            Pages
-          </div>
-
-          {pages.map(
-            page => (
-              <button
-                key={page.page}
-                className={
-                  selectedPage ===
-                    page.page
-                    ? "page-button active"
-                    : "page-button"
-                }
-                onClick={() =>
-                  setSelectedPage(
-                    page.page
-                  )
-                }
-              >
-                <span>
-                  {page.page}
-                </span>
-
-                <small>
-                  {
-                    page.concepts
-                      ?.length
-                    || 0
-                  } concepts
-                </small>
-              </button>
-            )
-          )}
-
-        </aside>
-
-
         <div className="proposal-pane">
 
           <div className="pane-title">
-            Page {
-              currentPage?.page
-            }
+            Extracted proposal
           </div>
 
+          {
+            (
+              dossier.page_analysis
+              || []
+            ).map(
+              (page) => (
+                <article
+                  className="page-block"
+                  key={page.page}
+                >
 
-          <div className="proposal-text">
-            {
-              currentPage
-                ?.text_preview
-              || "No native text extracted from this page."
-            }
-          </div>
+                  <div className="page-number">
+                    PAGE {page.page}
+                  </div>
+
+                  <p>
+                    {
+                      page.text_preview
+                      || "No text extracted."
+                    }
+                  </p>
+
+                </article>
+              )
+            )
+          }
 
         </div>
 
@@ -911,8 +850,7 @@ function DocumentWorkspace({
           <AnalysisSection
             title="Concepts"
             items={
-              currentPage
-                ?.concepts
+              dossier.concepts
               || []
             }
           />
@@ -920,18 +858,26 @@ function DocumentWorkspace({
           <AnalysisSection
             title="Claims"
             items={
-              currentPage
-                ?.claims
-              || []
+              (
+                dossier.claims
+                || []
+              ).map(
+                item =>
+                  `p.${item.page}: ${item.text}`
+              )
             }
           />
 
           <AnalysisSection
             title="KPIs"
             items={
-              currentPage
-                ?.kpis
-              || []
+              (
+                dossier.kpis
+                || []
+              ).map(
+                item =>
+                  `p.${item.page}: ${item.text}`
+              )
             }
           />
 
@@ -955,49 +901,50 @@ function AnalysisSection({
         {title}
       </div>
 
-      {!items.length && (
-        <p className="muted">
-          None detected.
-        </p>
-      )}
-
-      {items.map(
-        (item, index) => (
-          <div
-            className="analysis-item"
-            key={index}
-          >
-            {item}
-          </div>
-        )
-      )}
+      {
+        items.length
+          ? items
+            .slice(
+              0,
+              12
+            )
+            .map(
+              (
+                item,
+                index
+              ) => (
+                <div
+                  className="analysis-item"
+                  key={index}
+                >
+                  {item}
+                </div>
+              )
+            )
+          : (
+            <div className="muted">
+              None detected.
+            </div>
+          )
+      }
 
     </div>
   );
 }
 
 
-function ResearchWorkspace({
+function ResearchPage({
   dossier,
   research,
 }) {
-  const evidence =
-    research.evidence
-    || [];
-
-
   if (!dossier) {
     return (
-      <EmptyState
-        icon={BookOpen}
+      <Empty
         title="No research context"
-        text={
-          "Upload a proposal first. Research will start automatically."
-        }
+        text="Upload a proposal first."
       />
     );
   }
-
 
   return (
     <section className="workspace">
@@ -1005,108 +952,64 @@ function ResearchWorkspace({
       <div className="research-header">
 
         <div>
-          <span className="eyebrow">
+
+          <div className="eyebrow">
             EVIDENCE
-          </span>
+          </div>
 
           <h2>
-            Research generated from
-            the proposal
+            Research generated from the proposal
           </h2>
 
           <p>
-            Queries come from the
-            technical concepts and claims
-            extracted from your document.
+            Queries are created from
+            extracted concepts and claims.
           </p>
+
         </div>
 
 
-        <ResearchStatus
-          status={
-            research.status
+        <div
+          className={
+            `research-status ${research.status}`
           }
-        />
+        >
+          {research.status}
+        </div>
 
       </div>
 
 
-      {research.status ===
-        "running" && (
-        <div className="progress-panel">
-
-          <Loader2
-            className="spin"
-            size={18}
-          />
-
-          <div>
-            <strong>
-              Searching literature
-            </strong>
-
-            <span>
-              The proposal remains usable
-              while research runs.
-            </span>
-          </div>
-
-        </div>
-      )}
-
-
-      {research.status ===
-        "error" && (
-        <div className="warning-panel">
-
-          <FileSearch
-            size={20}
-          />
-
-          <div>
-            <strong>
-              Research provider error
-            </strong>
-
-            <p>
-              {
-                research.error
-                || "Research failed."
-              }
-            </p>
-          </div>
-
-        </div>
-      )}
-
-
-      {research.status ===
-        "complete"
-        && evidence.length === 0
-        && (
-          <div className="empty-inline">
-            No relevant evidence was
-            returned.
-          </div>
-        )
-      }
-
-
       <div className="evidence-list">
 
-        {evidence.map(
+        {
           (
-            group,
-            groupIndex
-          ) => (
-            <EvidenceGroup
-              key={
-                groupIndex
-              }
-              group={group}
-            />
+            research.evidence
+            || []
+          ).map(
+            (
+              group,
+              index
+            ) => (
+              <EvidenceGroup
+                key={index}
+                group={group}
+              />
+            )
           )
-        )}
+        }
+
+
+        {
+          !research.evidence?.length
+          && (
+            <div className="empty-inline">
+              Research results will appear
+              here while the background
+              pass runs.
+            </div>
+          )
+        }
 
       </div>
 
@@ -1118,87 +1021,71 @@ function ResearchWorkspace({
 function EvidenceGroup({
   group,
 }) {
-  const [
-    open,
-    setOpen,
-  ] = useState(true);
-
-
   return (
     <article className="evidence-group">
 
-      <button
-        className="evidence-heading"
-        onClick={() =>
-          setOpen(
-            current =>
-              !current
-          )
-        }
-      >
+      <div className="evidence-heading">
 
         <div>
-          <span className="eyebrow">
+
+          <div className="eyebrow">
             SEARCH QUERY
-          </span>
+          </div>
 
           <strong>
             {group.query}
           </strong>
+
         </div>
+
 
         <span>
           {
-            group.papers
-              ?.length
+            group.papers?.length
             || 0
           } results
         </span>
 
-      </button>
+      </div>
 
 
-      {open && (
-        <div className="evidence-body">
+      <div className="evidence-body">
 
-          <div className="source-links">
+        <div className="source-links">
 
-            <ExternalSource
-              label="Google Scholar"
-              href={
-                group.links
-                  ?.google_scholar
-              }
-            />
+          <ExternalLink
+            href={
+              group.links?.google_scholar
+            }
+            label="Google Scholar"
+          />
 
-            <ExternalSource
-              label="Google Patents"
-              href={
-                group.links
-                  ?.google_patents
-              }
-            />
+          <ExternalLink
+            href={
+              group.links?.google_patents
+            }
+            label="Google Patents"
+          />
 
-            <ExternalSource
-              label="Semantic Scholar"
-              href={
-                group.links
-                  ?.semantic_scholar
-              }
-            />
+          <ExternalLink
+            href={
+              group.links?.semantic_scholar
+            }
+            label="Semantic Scholar"
+          />
 
-            <ExternalSource
-              label="WIPO"
-              href={
-                group.links
-                  ?.wipo
-              }
-            />
+          <ExternalLink
+            href={
+              group.links?.wipo
+            }
+            label="WIPO"
+          />
 
-          </div>
+        </div>
 
 
-          {(
+        {
+          (
             group.papers
             || []
           ).map(
@@ -1220,9 +1107,7 @@ function EvidenceGroup({
                 <div className="paper-meta">
 
                   <span>
-                    {
-                      paper.source
-                    }
+                    {paper.source}
                   </span>
 
                   <span>
@@ -1243,31 +1128,28 @@ function EvidenceGroup({
 
 
                 <strong>
-                  {
-                    paper.title
-                  }
+                  {paper.title}
                 </strong>
 
-
                 <ArrowUpRight
-                  size={15}
+                  size={14}
                 />
 
               </a>
             )
-          )}
+          )
+        }
 
-        </div>
-      )}
+      </div>
 
     </article>
   );
 }
 
 
-function ExternalSource({
-  label,
+function ExternalLink({
   href,
+  label,
 }) {
   if (!href) {
     return null;
@@ -1280,188 +1162,326 @@ function ExternalSource({
       rel="noreferrer"
     >
       {label}
+
       <ArrowUpRight
-        size={12}
+        size={11}
       />
     </a>
   );
 }
 
 
-function ResearchStatus({
-  status,
+function NoveltyPage({
+  novelty,
+  dossier,
 }) {
-  return (
-    <div
-      className={
-        `research-status ${status}`
-      }
-    >
-      {status === "running" && (
-        <Loader2
-          size={13}
-          className="spin"
-        />
-      )}
-
-      {status}
-    </div>
-  );
-}
-
-
-function ReviewWorkspace({
-  title,
-}) {
-  const criteria = [
-    "Science & technology",
-    "Impact / national benefit",
-    "Management & delivery",
-    "Budget / value",
-  ];
-
-
-  const initial =
-    Object.fromEntries(
-      criteria.map(
-        criterion => [
-          criterion,
-          3,
-        ]
-      )
+  if (!dossier) {
+    return (
+      <Empty
+        title="No novelty assessment"
+        text="Upload a proposal first."
+      />
     );
+  }
 
+  if (!novelty) {
+    return (
+      <section className="workspace">
 
-  const [
-    scores,
-    setScores,
-  ] = useState(
-    initial
-  );
+        <div className="progress-panel">
 
+          <Loader2
+            size={17}
+            className="spin"
+          />
 
-  const average =
-    useMemo(
-      () => {
-        const values =
-          Object.values(
-            scores
-          );
+          <div>
 
-        return (
-          values.reduce(
-            (
-              sum,
-              value
-            ) =>
-              sum
-              + Number(value),
-            0,
-          )
-          / values.length
-        );
-      },
-      [scores],
+            <strong>
+              Novelty score is being calculated.
+            </strong>
+
+            <span>
+              It appears after the
+              research pass completes.
+            </span>
+
+          </div>
+
+        </div>
+
+      </section>
     );
+  }
+
+
+  const components =
+    novelty.components
+    || {};
 
 
   return (
     <section className="workspace">
 
-      <div className="review-header">
+      <div className="research-header">
 
-        <span className="eyebrow">
-          HUMAN REVIEW
-        </span>
+        <div>
 
-        <h2>
-          {title}
-        </h2>
+          <div className="eyebrow">
+            EVIDENCE-BASED SCREENING
+          </div>
+
+          <h2>
+            Novelty assessment
+          </h2>
+
+          <p>
+            This is a decision-support signal,
+            not a funding recommendation.
+          </p>
+
+        </div>
+
+      </div>
+
+
+      <div className="novelty-hero">
+
+        <div>
+
+          <div className="eyebrow">
+            NOVELTY SCORE
+          </div>
+
+          <div className="big-score">
+
+            {novelty.score}
+
+            <small>
+              /100
+            </small>
+
+          </div>
+
+          <span className="classification">
+            {novelty.classification} novelty
+          </span>
+
+        </div>
+
+
+        <div className="confidence">
+
+          <span>
+            CONFIDENCE
+          </span>
+
+          <strong>
+
+            {novelty.confidence}
+
+            <small>
+              /100
+            </small>
+
+          </strong>
+
+
+          <div className="score-bar">
+
+            <span
+              style={{
+                width:
+                  `${novelty.confidence}%`
+              }}
+            />
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <div className="component-grid">
+
+        <NoveltyComponent
+          label="Prior-art distance"
+          item={
+            components.prior_art_distance
+          }
+        />
+
+        <NoveltyComponent
+          label="Patent distance"
+          item={
+            components.patent_distance
+          }
+        />
+
+        <NoveltyComponent
+          label="Concept novelty"
+          item={
+            components.concept_novelty
+          }
+        />
+
+        <NoveltyComponent
+          label="Claim novelty"
+          item={
+            components.claim_novelty
+          }
+        />
+
+        <NoveltyComponent
+          label="Evidence confidence"
+          item={
+            components.evidence_confidence
+          }
+        />
+
+      </div>
+
+
+      <div className="panel">
+
+        <div className="panel-head">
+
+          <div>
+
+            <h3>
+              Closest retrieved prior work
+            </h3>
+
+            <p>
+              {
+                novelty.evidence?.query_count
+                || 0
+              } queries · {
+                novelty.evidence?.paper_count
+                || 0
+              } records
+            </p>
+
+          </div>
+
+        </div>
+
+
+        {
+          (
+            novelty.evidence
+              ?.closest_prior_work
+            || []
+          ).map(
+            (
+              item,
+              index
+            ) => (
+              <a
+                className="prior-work"
+                href={
+                  item.url
+                  || "#"
+                }
+                target="_blank"
+                rel="noreferrer"
+                key={index}
+              >
+
+                <div>
+
+                  <strong>
+                    {item.title}
+                  </strong>
+
+                  <span>
+                    {item.source}
+                    {" · "}
+                    {
+                      item.year
+                      || "—"
+                    }
+                  </span>
+
+                </div>
+
+
+                <b>
+                  {item.similarity}% similarity
+                </b>
+
+              </a>
+            )
+          )
+        }
+
+      </div>
+
+
+      <div className="methodology">
+
+        <strong>
+          How the number works
+        </strong>
 
         <p>
-          Decision-support workspace.
-          Final assessment remains with
-          the human reviewer.
+          {novelty.methodology}
         </p>
 
       </div>
 
-
-      <div className="review-grid">
-
-        {criteria.map(
-          criterion => (
-            <div
-              className="review-item"
-              key={criterion}
-            >
-
-              <div>
-                <strong>
-                  {criterion}
-                </strong>
-
-                <span>
-                  {
-                    scores[
-                      criterion
-                    ]
-                  } / 5
-                </span>
-              </div>
+    </section>
+  );
+}
 
 
-              <input
-                type="range"
-                min="1"
-                max="5"
-                step="1"
-                value={
-                  scores[
-                    criterion
-                  ]
-                }
-                onChange={
-                  event =>
-                    setScores({
-                      ...scores,
-                      [criterion]:
-                        Number(
-                          event
-                            .target
-                            .value
-                        ),
-                    })
-                }
-              />
+function NoveltyComponent({
+  label,
+  item,
+}) {
+  return (
+    <div className="novelty-component">
 
-            </div>
-          )
-        )}
-
-      </div>
-
-
-      <div className="overall-score">
+      <div>
 
         <span>
-          Preliminary score
+          {label}
         </span>
 
         <strong>
           {
-            average.toFixed(
-              2
-            )
+            item?.measured
+              ? `${item.score}/100`
+              : "Not measured"
           }
-          <small>
-            / 5
-          </small>
         </strong>
 
       </div>
 
-    </section>
+
+      <div className="component-bar">
+
+        <span
+          style={{
+            width:
+              item?.measured
+                ? `${item.score}%`
+                : "0%"
+          }}
+        />
+
+      </div>
+
+
+      <p>
+        {
+          item?.description
+          || "Not measured in this MVP."
+        }
+      </p>
+
+    </div>
   );
 }
 
@@ -1486,8 +1506,7 @@ function Stat({
 }
 
 
-function EmptyState({
-  icon: Icon,
+function Empty({
   title,
   text,
 }) {
@@ -1496,7 +1515,9 @@ function EmptyState({
 
       <div className="empty-state">
 
-        <Icon size={28} />
+        <FileText
+          size={27}
+        />
 
         <h3>
           {title}
