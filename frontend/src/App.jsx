@@ -6,6 +6,7 @@ import React, {
 import {
   Activity,
   ArrowUpRight,
+  BarChart3,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -39,14 +40,15 @@ const NAV = [
     BookOpen
   ],
   [
-    "novelty",
-    "Novelty",
-    ShieldCheck
+    "assessment",
+    "Assessment",
+    BarChart3
   ],
 ];
 
 
 export default function App() {
+
   const [
     page,
     setPage
@@ -74,12 +76,19 @@ export default function App() {
   ] = useState({
     status: "not_started",
     queries: [],
-    evidence: [],
+    evidence: []
   });
 
   const [
     novelty,
     setNovelty
+  ] = useState(
+    null
+  );
+
+  const [
+    assessment,
+    setAssessment
   ] = useState(
     null
   );
@@ -101,64 +110,94 @@ export default function App() {
 
   async function request(
     url,
-    options = {},
+    options = {}
   ) {
+
     let response;
 
     try {
-      response = await fetch(
-        url,
-        options
-      );
+
+      response =
+        await fetch(
+          url,
+          options
+        );
 
     } catch {
+
       throw new Error(
         "Could not reach the Render research server."
       );
+
     }
+
 
     let data = null;
 
     try {
-      data = await response.json();
+
+      data =
+        await response.json();
 
     } catch {
+
       data = null;
+
     }
+
 
     if (!response.ok) {
+
       throw new Error(
         data?.detail
-        || `Server returned HTTP ${response.status}.`
+        ||
+        `Server returned HTTP ${response.status}.`
       );
+
     }
 
+
     return data;
+
   }
 
 
   async function uploadProposal(
     file
   ) {
+
     if (!file) {
       return;
     }
 
-    setBusy(true);
 
-    setMessage(
-      "Uploading proposal..."
+    setBusy(
+      true
     );
 
-    setDossier(null);
+    setMessage(
+      "Uploading and reading proposal..."
+    );
 
-    setNovelty(null);
+
+    setDossier(
+      null
+    );
 
     setResearch({
       status: "not_started",
       queries: [],
-      evidence: [],
+      evidence: []
     });
+
+    setNovelty(
+      null
+    );
+
+    setAssessment(
+      null
+    );
+
 
     const body =
       new FormData();
@@ -168,15 +207,19 @@ export default function App() {
       file
     );
 
+
     try {
+
       const result =
         await request(
           `${API}/proposals/upload`,
           {
-            method: "POST",
-            body,
+            method:
+              "POST",
+            body
           }
         );
+
 
       setDocumentId(
         result.id
@@ -186,99 +229,145 @@ export default function App() {
         result.document
       );
 
+
       setMessage(
-        "Proposal received. Research is running in the background."
+        "Proposal loaded. Research is running in the background."
       );
+
 
       setPage(
         "document"
       );
 
-    } catch (error) {
+
+    } catch (
+      error
+    ) {
+
       setMessage(
         error.message
       );
 
     } finally {
-      setBusy(false);
+
+      setBusy(
+        false
+      );
+
     }
+
   }
 
 
-  useEffect(() => {
-    if (!documentId) {
-      return;
-    }
+  useEffect(
+    () => {
 
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const result =
-          await request(
-            `${API}/proposals/${documentId}`
-          );
-
-        if (cancelled) {
-          return;
-        }
-
-        setDossier(
-          result.dossier
-        );
-
-        setResearch(
-          result.research
-        );
-
-        setNovelty(
-          result.novelty
-        );
-
-        if (
-          result.research?.status
-          === "running"
-        ) {
-          setTimeout(
-            poll,
-            2000
-          );
-        }
-
-      } catch (error) {
-        if (!cancelled) {
-          setMessage(
-            error.message
-          );
-        }
+      if (!documentId) {
+        return;
       }
-    };
 
-    poll();
 
-    return () => {
-      cancelled = true;
-    };
+      let cancelled = false;
 
-  }, [
-    documentId
-  ]);
+
+      async function poll() {
+
+        try {
+
+          const result =
+            await request(
+              `${API}/proposals/${documentId}`
+            );
+
+
+          if (cancelled) {
+            return;
+          }
+
+
+          setDossier(
+            result.dossier
+          );
+
+          setResearch(
+            result.research
+          );
+
+          setNovelty(
+            result.novelty
+          );
+
+          setAssessment(
+            result.assessment
+          );
+
+
+          if (
+            result.research?.status
+            ===
+            "running"
+          ) {
+
+            window.setTimeout(
+              poll,
+              2000
+            );
+
+          }
+
+        } catch (
+          error
+        ) {
+
+          if (!cancelled) {
+
+            setMessage(
+              error.message
+            );
+
+          }
+
+        }
+
+      }
+
+
+      poll();
+
+
+      return () => {
+
+        cancelled = true;
+
+      };
+
+    },
+    [
+      documentId
+    ]
+  );
 
 
   return (
+
     <div className="app">
+
 
       <aside className="sidebar">
 
         <div className="brand">
 
           <div className="brand-mark">
+
             <Activity
               size={18}
             />
+
           </div>
 
+
           <div>
+
             <strong>
               FI Research
             </strong>
@@ -286,6 +375,7 @@ export default function App() {
             <span>
               Intelligence
             </span>
+
           </div>
 
         </div>
@@ -301,17 +391,28 @@ export default function App() {
                 Icon
               ]
             ) => (
+
               <button
-                key={id}
+
+                key={
+                  id
+                }
+
                 className={
                   page === id
                     ? "nav active"
                     : "nav"
                 }
-                onClick={() =>
-                  setPage(id)
+
+                onClick={
+                  () =>
+                    setPage(
+                      id
+                    )
                 }
+
               >
+
                 <Icon
                   size={16}
                 />
@@ -320,14 +421,18 @@ export default function App() {
                   {label}
                 </span>
 
+
                 {page === id && (
+
                   <ChevronRight
                     size={13}
                     className="nav-arrow"
                   />
+
                 )}
 
               </button>
+
             )
           )}
 
@@ -358,12 +463,16 @@ export default function App() {
             </div>
 
             <h1>
+
               {
                 NAV.find(
-                  ([id]) =>
-                    id === page
+                  item =>
+                    item[0]
+                    ===
+                    page
                 )?.[1]
               }
+
             </h1>
 
           </div>
@@ -375,8 +484,9 @@ export default function App() {
 
             {
               busy
-                ? "Working"
-                : research.status === "running"
+                ? "Processing"
+                : research.status
+                  === "running"
                   ? "Researching"
                   : "Ready"
             }
@@ -387,6 +497,7 @@ export default function App() {
 
 
         {message && (
+
           <div className="toast">
 
             <span>
@@ -402,63 +513,113 @@ export default function App() {
             </button>
 
           </div>
+
         )}
 
 
         {page === "overview" && (
+
           <Overview
-            dossier={dossier}
-            research={research}
-            novelty={novelty}
-            busy={busy}
+            dossier={
+              dossier
+            }
+
+            research={
+              research
+            }
+
+            assessment={
+              assessment
+            }
+
+            busy={
+              busy
+            }
+
             uploadProposal={
               uploadProposal
             }
-            setPage={setPage}
+
+            setPage={
+              setPage
+            }
           />
+
         )}
 
 
         {page === "document" && (
+
           <DocumentPage
-            dossier={dossier}
-            setPage={setPage}
+            dossier={
+              dossier
+            }
+
+            setPage={
+              setPage
+            }
           />
+
         )}
 
 
         {page === "research" && (
+
           <ResearchPage
-            dossier={dossier}
-            research={research}
+            dossier={
+              dossier
+            }
+
+            research={
+              research
+            }
           />
+
         )}
 
 
-        {page === "novelty" && (
-          <NoveltyPage
-            novelty={novelty}
-            dossier={dossier}
-            research={research}
+        {page === "assessment" && (
+
+          <AssessmentPage
+            dossier={
+              dossier
+            }
+
+            novelty={
+              novelty
+            }
+
+            assessment={
+              assessment
+            }
+
+            research={
+              research
+            }
           />
+
         )}
 
       </main>
 
     </div>
+
   );
+
 }
 
 
 function Overview({
   dossier,
   research,
-  novelty,
+  assessment,
   busy,
   uploadProposal,
-  setPage,
+  setPage
 }) {
+
   return (
+
     <section className="workspace">
 
       <div className="hero">
@@ -472,14 +633,13 @@ function Overview({
           <h2>
             Read the proposal.
             <br />
-            Investigate what already exists.
+            Test the path to impact.
           </h2>
 
           <p>
-            Upload one proposal and let
-            the system extract its structure,
-            concepts, claims and KPIs,
-            then build a research evidence set.
+            Extract the science, investigate
+            existing work, then assess novelty,
+            translation and market viability.
           </p>
 
         </div>
@@ -516,9 +676,9 @@ function Overview({
         />
 
         <Stat
-          label="Concepts"
+          label="Research"
           value={
-            dossier?.concepts?.length
+            research.evidence?.length
             ?? 0
           }
         />
@@ -526,8 +686,9 @@ function Overview({
         <Stat
           label="Novelty"
           value={
-            novelty?.score != null
-              ? `${novelty.score}/100`
+            assessment?.novelty?.score
+              != null
+              ? `${assessment.novelty.score}/100`
               : "Pending"
           }
         />
@@ -557,17 +718,20 @@ function Overview({
         <div className="upload-icon">
 
           {busy
+
             ? (
               <Loader2
                 size={21}
                 className="spin"
               />
             )
+
             : (
               <Upload
                 size={21}
               />
             )
+
           }
 
         </div>
@@ -576,15 +740,18 @@ function Overview({
         <div className="upload-copy">
 
           <strong>
+
             {
               busy
                 ? "Reading proposal..."
                 : "Choose a proposal"
             }
+
           </strong>
 
           <span>
-            Document analysis starts immediately.
+            Document analysis and research
+            begin automatically.
           </span>
 
         </div>
@@ -596,21 +763,31 @@ function Overview({
 
 
         <input
+
           type="file"
+
           accept=".pdf,.docx,.txt,.md"
-          disabled={busy}
+
+          disabled={
+            busy
+          }
+
           onChange={
-            (event) =>
+            event =>
               uploadProposal(
-                event.target.files?.[0]
+                event
+                  .target
+                  .files?.[0]
               )
           }
+
         />
 
       </label>
 
 
       {dossier && (
+
         <div className="document-summary">
 
           <div>
@@ -626,6 +803,7 @@ function Overview({
             </h3>
 
             <p>
+
               {
                 (
                   dossier.concepts
@@ -633,11 +811,15 @@ function Overview({
                 )
                 .slice(
                   0,
-                  7
+                  8
                 )
-                .join(" · ")
-                || "No concepts detected."
+                .join(
+                  " · "
+                )
+                ||
+                "No technical concepts detected."
               }
+
             </p>
 
           </div>
@@ -674,12 +856,12 @@ function Overview({
             <button
               onClick={() =>
                 setPage(
-                  "novelty"
+                  "assessment"
                 )
               }
             >
-              Novelty
-              <ShieldCheck
+              Assessment
+              <BarChart3
                 size={13}
               />
             </button>
@@ -687,60 +869,41 @@ function Overview({
           </div>
 
         </div>
+
       )}
 
-
-      {
-        dossier
-        && research.status === "running"
-        && (
-          <div className="progress-panel">
-
-            <Loader2
-              size={17}
-              className="spin"
-            />
-
-            <div>
-
-              <strong>
-                Research is running in the background
-              </strong>
-
-              <span>
-                Keep exploring the proposal
-                while evidence is collected.
-              </span>
-
-            </div>
-
-          </div>
-        )
-      }
-
     </section>
+
   );
+
 }
 
 
 function DocumentPage({
   dossier,
-  setPage,
+  setPage
 }) {
+
   if (!dossier) {
+
     return (
       <Empty
         title="No proposal loaded"
         text="Upload a proposal from Overview."
       />
     );
+
   }
+
 
   if (
     dossier.status
-    === "needs_visual_processing"
+    ===
+    "needs_visual_processing"
   ) {
+
     return (
+
       <section className="workspace">
 
         <div className="warning-panel">
@@ -752,13 +915,12 @@ function DocumentPage({
           <div>
 
             <strong>
-              This document needs visual processing.
+              Visual processing required.
             </strong>
 
             <p>
-              No usable native text layer was found.
-              The MVP flags scanned PDFs rather
-              than pretending they were read.
+              No usable native text layer
+              was found in this document.
             </p>
 
           </div>
@@ -766,11 +928,14 @@ function DocumentPage({
         </div>
 
       </section>
+
     );
+
   }
 
 
   return (
+
     <section className="workspace">
 
       <div className="document-header">
@@ -791,17 +956,24 @@ function DocumentPage({
 
 
         <button
+
           className="research-button"
-          onClick={() =>
-            setPage(
-              "research"
-            )
+
+          onClick={
+            () =>
+              setPage(
+                "assessment"
+              )
           }
+
         >
-          Investigate evidence
+
+          View assessment
+
           <ArrowUpRight
             size={13}
           />
+
         </button>
 
       </div>
@@ -812,32 +984,45 @@ function DocumentPage({
         <div className="proposal-pane">
 
           <div className="pane-title">
-            Extracted proposal
+            Proposal text
           </div>
+
 
           {
             (
               dossier.page_analysis
               || []
             ).map(
-              (page) => (
+              page => (
+
                 <article
                   className="page-block"
-                  key={page.page}
+                  key={
+                    page.page
+                  }
                 >
 
                   <div className="page-number">
-                    PAGE {page.page}
+
+                    PAGE {
+                      page.page
+                    }
+
                   </div>
 
+
                   <p>
+
                     {
                       page.text_preview
-                      || "No text extracted."
+                      ||
+                      "No text extracted."
                     }
+
                   </p>
 
                 </article>
+
               )
             )
           }
@@ -848,16 +1033,23 @@ function DocumentPage({
         <aside className="analysis-pane">
 
           <AnalysisSection
+
             title="Concepts"
+
             items={
               dossier.concepts
               || []
             }
+
           />
 
+
           <AnalysisSection
+
             title="Claims"
+
             items={
+
               (
                 dossier.claims
                 || []
@@ -865,12 +1057,18 @@ function DocumentPage({
                 item =>
                   `p.${item.page}: ${item.text}`
               )
+
             }
+
           />
 
+
           <AnalysisSection
+
             title="KPIs"
+
             items={
+
               (
                 dossier.kpis
                 || []
@@ -878,7 +1076,9 @@ function DocumentPage({
                 item =>
                   `p.${item.page}: ${item.text}`
               )
+
             }
+
           />
 
         </aside>
@@ -886,20 +1086,25 @@ function DocumentPage({
       </div>
 
     </section>
+
   );
+
 }
 
 
 function AnalysisSection({
   title,
-  items,
+  items
 }) {
+
   return (
+
     <div className="analysis-section">
 
       <div className="pane-title">
         {title}
       </div>
+
 
       {
         items.length
@@ -913,40 +1118,56 @@ function AnalysisSection({
                 item,
                 index
               ) => (
+
                 <div
                   className="analysis-item"
-                  key={index}
+                  key={
+                    index
+                  }
                 >
                   {item}
                 </div>
+
               )
             )
+
           : (
+
             <div className="muted">
               None detected.
             </div>
+
           )
       }
 
     </div>
+
   );
+
 }
 
 
 function ResearchPage({
   dossier,
-  research,
+  research
 }) {
+
   if (!dossier) {
+
     return (
+
       <Empty
         title="No research context"
         text="Upload a proposal first."
       />
+
     );
+
   }
 
+
   return (
+
     <section className="workspace">
 
       <div className="research-header">
@@ -962,8 +1183,9 @@ function ResearchPage({
           </h2>
 
           <p>
-            Queries are created from
-            extracted concepts and claims.
+            The search engine creates queries
+            from concepts and claims instead
+            of requiring manual first searches.
           </p>
 
         </div>
@@ -991,10 +1213,16 @@ function ResearchPage({
               group,
               index
             ) => (
+
               <EvidenceGroup
-                key={index}
-                group={group}
+                key={
+                  index
+                }
+                group={
+                  group
+                }
               />
+
             )
           )
         }
@@ -1003,25 +1231,30 @@ function ResearchPage({
         {
           !research.evidence?.length
           && (
+
             <div className="empty-inline">
-              Research results will appear
-              here while the background
-              pass runs.
+              Research results will appear here
+              while the background search runs.
             </div>
+
           )
         }
 
       </div>
 
     </section>
+
   );
+
 }
 
 
 function EvidenceGroup({
-  group,
+  group
 }) {
+
   return (
+
     <article className="evidence-group">
 
       <div className="evidence-heading">
@@ -1033,17 +1266,23 @@ function EvidenceGroup({
           </div>
 
           <strong>
-            {group.query}
+            {
+              group.query
+            }
           </strong>
 
         </div>
 
 
         <span>
+
           {
             group.papers?.length
             || 0
-          } results
+          }
+
+          {" results"}
+
         </span>
 
       </div>
@@ -1093,21 +1332,33 @@ function EvidenceGroup({
               paper,
               index
             ) => (
+
               <a
+
                 className="paper"
+
                 href={
                   paper.url
-                  || "#"
+                  ||
+                  "#"
                 }
+
                 target="_blank"
+
                 rel="noreferrer"
-                key={index}
+
+                key={
+                  index
+                }
+
               >
 
                 <div className="paper-meta">
 
                   <span>
-                    {paper.source}
+                    {
+                      paper.source
+                    }
                   </span>
 
                   <span>
@@ -1121,21 +1372,28 @@ function EvidenceGroup({
                     {
                       paper.citations
                       || 0
-                    } citations
+                    }
+
+                    {" citations"}
+
                   </span>
 
                 </div>
 
 
                 <strong>
-                  {paper.title}
+                  {
+                    paper.title
+                  }
                 </strong>
+
 
                 <ArrowUpRight
                   size={14}
                 />
 
               </a>
+
             )
           )
         }
@@ -1143,49 +1401,37 @@ function EvidenceGroup({
       </div>
 
     </article>
+
   );
+
 }
 
 
-function ExternalLink({
-  href,
-  label,
-}) {
-  if (!href) {
-    return null;
-  }
-
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-    >
-      {label}
-
-      <ArrowUpRight
-        size={11}
-      />
-    </a>
-  );
-}
-
-
-function NoveltyPage({
-  novelty,
+function AssessmentPage({
   dossier,
+  novelty,
+  assessment,
+  research
 }) {
+
   if (!dossier) {
+
     return (
+
       <Empty
-        title="No novelty assessment"
+        title="No assessment"
         text="Upload a proposal first."
       />
+
     );
+
   }
 
-  if (!novelty) {
+
+  if (!assessment) {
+
     return (
+
       <section className="workspace">
 
         <div className="progress-panel">
@@ -1198,12 +1444,12 @@ function NoveltyPage({
           <div>
 
             <strong>
-              Novelty score is being calculated.
+              Building assessment.
             </strong>
 
             <span>
-              It appears after the
-              research pass completes.
+              Novelty, translation and market
+              viability appear after research.
             </span>
 
           </div>
@@ -1211,16 +1457,14 @@ function NoveltyPage({
         </div>
 
       </section>
+
     );
+
   }
 
 
-  const components =
-    novelty.components
-    || {};
-
-
   return (
+
     <section className="workspace">
 
       <div className="research-header">
@@ -1228,16 +1472,17 @@ function NoveltyPage({
         <div>
 
           <div className="eyebrow">
-            EVIDENCE-BASED SCREENING
+            DECISION SUPPORT
           </div>
 
           <h2>
-            Novelty assessment
+            Proposal assessment
           </h2>
 
           <p>
-            This is a decision-support signal,
-            not a funding recommendation.
+            The scores are evidence-based
+            screening signals, not funding
+            recommendations.
           </p>
 
         </div>
@@ -1245,252 +1490,361 @@ function NoveltyPage({
       </div>
 
 
-      <div className="novelty-hero">
+      <div className="score-overview">
+
+        <ScoreCard
+
+          label="Novelty"
+
+          data={
+            assessment.novelty
+          }
+
+        />
+
+
+        <ScoreCard
+
+          label="Translation"
+
+          data={
+            assessment.translation
+          }
+
+        />
+
+
+        <ScoreCard
+
+          label="Market viability"
+
+          data={
+            assessment.market
+          }
+
+        />
+
+      </div>
+
+
+      <div className="assessment-note">
+
+        <strong>
+          Read the numbers, not just the score.
+        </strong>
+
+        <p>
+
+          Every score below shows its inputs,
+          weights, evidence basis and whether
+          the component was actually measured.
+
+        </p>
+
+      </div>
+
+
+      <AssessmentSection
+
+        title="Translation"
+
+        data={
+          assessment.translation
+        }
+
+      />
+
+
+      <AssessmentSection
+
+        title="Market viability"
+
+        data={
+          assessment.market
+        }
+
+      />
+
+
+      <AssessmentSection
+
+        title="Novelty"
+
+        data={
+          assessment.novelty
+        }
+
+      />
+
+
+    </section>
+
+  );
+
+}
+
+
+function ScoreCard({
+  label,
+  data
+}) {
+
+  const score =
+    data?.score;
+
+
+  return (
+
+    <div className="score-card">
+
+      <span className="eyebrow">
+        {label}
+      </span>
+
+
+      <strong>
+
+        {
+          score != null
+            ? score
+            : "—"
+        }
+
+        <small>
+          {
+            score != null
+              ? "/100"
+              : ""
+          }
+        </small>
+
+      </strong>
+
+
+      <span className="score-class">
+
+        {
+          data?.classification
+          ||
+          "Insufficient evidence"
+        }
+
+      </span>
+
+
+      <div className="score-card-meta">
+
+        Confidence
+
+        {" "}
+
+        {
+          data?.confidence
+          != null
+            ? `${data.confidence}/100`
+            : "—"
+        }
+
+      </div>
+
+    </div>
+
+  );
+
+}
+
+
+function AssessmentSection({
+  title,
+  data
+}) {
+
+  if (!data) {
+
+    return null;
+
+  }
+
+
+  return (
+
+    <div className="assessment-section">
+
+      <div className="assessment-section-header">
 
         <div>
 
-          <div className="eyebrow">
-            NOVELTY SCORE
-          </div>
+          <h3>
+            {title}
+          </h3>
 
-          <div className="big-score">
-
-            {novelty.score}
-
-            <small>
-              /100
-            </small>
-
-          </div>
-
-          <span className="classification">
-            {novelty.classification} novelty
-          </span>
+          <p>
+            {
+              data.methodology
+            }
+          </p>
 
         </div>
 
 
-        <div className="confidence">
+        <div className="formula-score">
+
+          {
+            data.score
+            != null
+              ? `${data.score}/100`
+              : "Not enough evidence"
+          }
+
+        </div>
+
+      </div>
+
+
+      <div className="component-table">
+
+        <div className="component-row component-head">
 
           <span>
-            CONFIDENCE
+            Component
           </span>
 
-          <strong>
+          <span>
+            Weight
+          </span>
 
-            {novelty.confidence}
+          <span>
+            Score
+          </span>
 
-            <small>
-              /100
-            </small>
-
-          </strong>
-
-
-          <div className="score-bar">
-
-            <span
-              style={{
-                width:
-                  `${novelty.confidence}%`
-              }}
-            />
-
-          </div>
-
-        </div>
-
-      </div>
-
-
-      <div className="component-grid">
-
-        <NoveltyComponent
-          label="Prior-art distance"
-          item={
-            components.prior_art_distance
-          }
-        />
-
-        <NoveltyComponent
-          label="Patent distance"
-          item={
-            components.patent_distance
-          }
-        />
-
-        <NoveltyComponent
-          label="Concept novelty"
-          item={
-            components.concept_novelty
-          }
-        />
-
-        <NoveltyComponent
-          label="Claim novelty"
-          item={
-            components.claim_novelty
-          }
-        />
-
-        <NoveltyComponent
-          label="Evidence confidence"
-          item={
-            components.evidence_confidence
-          }
-        />
-
-      </div>
-
-
-      <div className="panel">
-
-        <div className="panel-head">
-
-          <div>
-
-            <h3>
-              Closest retrieved prior work
-            </h3>
-
-            <p>
-              {
-                novelty.evidence?.query_count
-                || 0
-              } queries · {
-                novelty.evidence?.paper_count
-                || 0
-              } records
-            </p>
-
-          </div>
+          <span>
+            Status
+          </span>
 
         </div>
 
 
         {
           (
-            novelty.evidence
-              ?.closest_prior_work
+            data.components
             || []
           ).map(
             (
               item,
               index
             ) => (
-              <a
-                className="prior-work"
-                href={
-                  item.url
-                  || "#"
+
+              <div
+                className="component-row"
+                key={
+                  index
                 }
-                target="_blank"
-                rel="noreferrer"
-                key={index}
               >
 
-                <div>
+                <span>
 
                   <strong>
-                    {item.title}
+                    {
+                      item.label
+                    }
                   </strong>
 
-                  <span>
-                    {item.source}
-                    {" · "}
+                  <small>
                     {
-                      item.year
-                      || "—"
+                      item.basis
                     }
-                  </span>
+                  </small>
 
-                </div>
+                </span>
 
 
-                <b>
-                  {item.similarity}% similarity
-                </b>
+                <span>
+                  {
+                    item.weight
+                  }%
+                </span>
 
-              </a>
+
+                <span>
+
+                  {
+                    item.measured
+                      ? item.score
+                      : "—"
+                  }
+
+                </span>
+
+
+                <span>
+
+                  {
+                    item.measured
+                      ? "Measured"
+                      : "Not measured"
+                  }
+
+                </span>
+
+              </div>
+
             )
           )
         }
 
       </div>
 
+    </div>
 
-      <div className="methodology">
-
-        <strong>
-          How the number works
-        </strong>
-
-        <p>
-          {novelty.methodology}
-        </p>
-
-      </div>
-
-    </section>
   );
+
 }
 
 
-function NoveltyComponent({
-  label,
-  item,
+function ExternalLink({
+  href,
+  label
 }) {
+
+  if (!href) {
+    return null;
+  }
+
+
   return (
-    <div className="novelty-component">
 
-      <div>
+    <a
 
-        <span>
-          {label}
-        </span>
+      href={
+        href
+      }
 
-        <strong>
-          {
-            item?.measured
-              ? `${item.score}/100`
-              : "Not measured"
-          }
-        </strong>
+      target="_blank"
 
-      </div>
+      rel="noreferrer"
 
+    >
 
-      <div className="component-bar">
+      {label}
 
-        <span
-          style={{
-            width:
-              item?.measured
-                ? `${item.score}%`
-                : "0%"
-          }}
-        />
+      <ArrowUpRight
+        size={11}
+      />
 
-      </div>
+    </a>
 
-
-      <p>
-        {
-          item?.description
-          || "Not measured in this MVP."
-        }
-      </p>
-
-    </div>
   );
+
 }
 
 
 function Stat({
   label,
-  value,
+  value
 }) {
+
   return (
+
     <div className="stat">
 
       <span>
@@ -1502,15 +1856,19 @@ function Stat({
       </strong>
 
     </div>
+
   );
+
 }
 
 
 function Empty({
   title,
-  text,
+  text
 }) {
+
   return (
+
     <section className="workspace">
 
       <div className="empty-state">
@@ -1530,5 +1888,7 @@ function Empty({
       </div>
 
     </section>
+
   );
+
 }
