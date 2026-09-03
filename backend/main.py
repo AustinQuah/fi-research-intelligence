@@ -8,15 +8,11 @@ from typing import Any
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.assessment import (
-    build_assessment,
-)
-
+from services.assessment import build_assessment
 from services.documents import (
     build_document_dossier,
     parse_document,
 )
-
 from services.research import (
     calculate_novelty,
     run_research,
@@ -25,7 +21,7 @@ from services.research import (
 
 app = FastAPI(
     title="FI Research Intelligence API",
-    version="5.0.0",
+    version="6.0.0",
 )
 
 
@@ -38,15 +34,23 @@ app.add_middleware(
 )
 
 
+# ------------------------------------------------------------
+# MVP storage
+# ------------------------------------------------------------
+
 DOCUMENTS: dict[str, dict[str, Any]] = {}
 
+
+# ------------------------------------------------------------
+# Basic endpoints
+# ------------------------------------------------------------
 
 @app.get("/")
 async def root():
     return {
         "service": "FI Research Intelligence API",
         "status": "online",
-        "version": "5.0.0",
+        "version": "6.0.0",
     }
 
 
@@ -54,27 +58,42 @@ async def root():
 async def health():
     return {
         "status": "ok",
-        "version": "5.0.0",
+        "version": "6.0.0",
     }
 
+
+# ------------------------------------------------------------
+# Upload
+# ------------------------------------------------------------
 
 @app.post("/api/proposals/upload")
 async def upload_proposal(
     file: UploadFile = File(...),
 ):
-    filename = file.filename or "proposal"
-    suffix = Path(filename).suffix.lower()
+    filename = (
+        file.filename
+        or "proposal"
+    )
 
-    if suffix not in {
+    suffix = (
+        Path(filename)
+        .suffix
+        .lower()
+    )
+
+    allowed = {
         ".pdf",
         ".docx",
         ".txt",
         ".md",
-    }:
+    }
+
+    if suffix not in allowed:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Supported formats are PDF, DOCX, TXT and MD."
+                "Supported formats are "
+                "PDF, DOCX, TXT and MD."
             ),
         )
 
@@ -92,13 +111,14 @@ async def upload_proposal(
 
     DOCUMENTS[document_id] = {
         "id": document_id,
-        "status": "processing",
         "filename": filename,
+        "status": "processing",
         "dossier": None,
         "research": {
             "status": "not_started",
             "queries": [],
             "evidence": [],
+            "error": None,
         },
         "novelty": None,
         "assessment": None,
@@ -106,15 +126,22 @@ async def upload_proposal(
     }
 
     await process_document(
-        document_id,
-        filename,
-        suffix,
-        content,
+        document_id=document_id,
+        filename=filename,
+        suffix=suffix,
+        content=content,
     )
 
     item = DOCUMENTS[
         document_id
     ]
+
+    if item["status"] == "error":
+        raise HTTPException(
+            status_code=500,
+            detail=item["error"]
+            or "Document processing failed.",
+        )
 
     return {
         "id": document_id,
@@ -180,23 +207,30 @@ async def process_document(
 
     except Exception as error:
 
-        item = DOCUMENTS[
+        DOCUMENTS[
             document_id
-        ]
+        ]["status"] = "error"
 
-        item["status"] = "error"
-
-        item["error"] = str(
+        DOCUMENTS[
+            document_id
+        ]["error"] = str(
             error
         )
 
     finally:
+
         if path:
+
             try:
                 os.unlink(path)
+
             except OSError:
                 pass
 
+
+# ------------------------------------------------------------
+# Background research
+# ------------------------------------------------------------
 
 async def run_research_pipeline(
     document_id: str,
@@ -232,13 +266,16 @@ async def run_research_pipeline(
 
         item["assessment"] = (
             build_assessment(
-                dossier,
-                research,
-                novelty,
+                dossier=dossier,
+                research=research,
+                novelty=novelty,
             )
         )
 
     except Exception as error:
+
+        # Research failure MUST NOT destroy
+        # an otherwise valid document.
 
         item["research"] = {
             "status": "error",
@@ -247,13 +284,14 @@ async def run_research_pipeline(
             "error": str(error),
         }
 
-        # We deliberately do not fabricate
-        # assessment numbers when research failed.
-
         item["novelty"] = None
 
         item["assessment"] = None
 
+
+# ------------------------------------------------------------
+# Proposal retrieval
+# ------------------------------------------------------------
 
 @app.get(
     "/api/proposals/{document_id}"
@@ -266,13 +304,22 @@ async def get_proposal(
     )
 
     if not item:
+
         raise HTTPException(
             status_code=404,
-            detail="Document not found.",
+            detail=(
+                "Document not found. "
+                "The Render service may have restarted "
+                "and cleared the temporary MVP memory."
+            ),
         )
 
     return item
 
+
+# ------------------------------------------------------------
+# Research
+# ------------------------------------------------------------
 
 @app.get(
     "/api/proposals/{document_id}/research"
@@ -285,6 +332,7 @@ async def get_research(
     )
 
     if not item:
+
         raise HTTPException(
             status_code=404,
             detail="Document not found.",
@@ -292,6 +340,10 @@ async def get_research(
 
     return item["research"]
 
+
+# ------------------------------------------------------------
+# Novelty
+# ------------------------------------------------------------
 
 @app.get(
     "/api/proposals/{document_id}/novelty"
@@ -304,6 +356,7 @@ async def get_novelty(
     )
 
     if not item:
+
         raise HTTPException(
             status_code=404,
             detail="Document not found.",
@@ -318,9 +371,15 @@ async def get_novelty(
                 "not_ready",
             )
         ),
-        "novelty": item["novelty"],
+        "novelty": item[
+            "novelty"
+        ],
     }
 
+
+# ------------------------------------------------------------
+# Full assessment
+# ------------------------------------------------------------
 
 @app.get(
     "/api/proposals/{document_id}/assessment"
@@ -333,6 +392,7 @@ async def get_assessment(
     )
 
     if not item:
+
         raise HTTPException(
             status_code=404,
             detail="Document not found.",
@@ -354,7 +414,7 @@ async def get_assessment(
 
 
 # ------------------------------------------------------------
-# Backward-compatible endpoint
+# Backward compatibility
 # ------------------------------------------------------------
 
 @app.post(
