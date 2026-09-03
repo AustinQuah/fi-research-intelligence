@@ -8,13 +8,16 @@ import httpx
 CACHE: dict[str, dict] = {}
 
 
-def tokenize(text: str) -> set[str]:
+def tokenize(
+    text: str,
+) -> set[str]:
+
     words = re.findall(
         r"[a-zA-Z0-9]{3,}",
         text.lower(),
     )
 
-    stop = {
+    stop_words = {
         "the",
         "and",
         "for",
@@ -58,29 +61,46 @@ def tokenize(text: str) -> set[str]:
     return {
         word
         for word in words
-        if word not in stop
+        if word not in stop_words
     }
 
 
 def similarity(
-    a: str,
-    b: str,
+    left_text: str,
+    right_text: str,
 ) -> float:
-    left = tokenize(a)
-    right = tokenize(b)
+
+    left = tokenize(
+        left_text
+    )
+
+    right = tokenize(
+        right_text
+    )
 
     if not left or not right:
         return 0.0
 
+    union = (
+        left
+        | right
+    )
+
+    intersection = (
+        left
+        & right
+    )
+
     return (
-        len(left & right)
-        / len(left | right)
+        len(intersection)
+        / len(union)
     )
 
 
 async def get_json(
     url: str,
 ) -> dict:
+
     if url in CACHE:
         return CACHE[url]
 
@@ -90,38 +110,51 @@ async def get_json(
         headers={
             "Accept": "application/json",
             "User-Agent": (
-                "FI-Research-Intelligence/1.0"
+                "FI-Research-Intelligence/6.0"
             ),
         },
     ) as client:
+
         for attempt in range(3):
+
             try:
+
                 response = await client.get(
                     url
                 )
 
                 if response.status_code == 200:
+
                     data = response.json()
+
                     CACHE[url] = data
+
                     return data
 
                 if response.status_code == 429:
+
                     await asyncio.sleep(
-                        1.5 * (
-                            attempt + 1
+                        1.5
+                        * (
+                            attempt
+                            + 1
                         )
                     )
+
                     continue
 
                 response.raise_for_status()
 
             except httpx.HTTPError:
+
                 if attempt == 2:
                     raise
 
                 await asyncio.sleep(
-                    0.75 * (
-                        attempt + 1
+                    0.75
+                    * (
+                        attempt
+                        + 1
                     )
                 )
 
@@ -133,6 +166,7 @@ async def get_json(
 def build_queries(
     dossier: dict,
 ) -> list[str]:
+
     concepts = dossier.get(
         "concepts",
         [],
@@ -141,6 +175,7 @@ def build_queries(
     queries = []
 
     if concepts:
+
         queries.append(
             " ".join(
                 concepts[:3]
@@ -148,17 +183,27 @@ def build_queries(
         )
 
     for concept in concepts[:5]:
-        queries.append(concept)
 
-    if len(concepts) >= 2:
         queries.append(
-            f"{concepts[0]} {concepts[1]}"
+            concept
         )
 
-    for claim in dossier.get(
+    if len(concepts) >= 2:
+
+        queries.append(
+            (
+                f"{concepts[0]} "
+                f"{concepts[1]}"
+            )
+        )
+
+    claims = dossier.get(
         "claims",
         [],
-    )[:2]:
+    )
+
+    for claim in claims[:3]:
+
         text = claim.get(
             "text",
             "",
@@ -167,44 +212,53 @@ def build_queries(
         words = text.split()
 
         if len(words) >= 5:
+
             queries.append(
                 " ".join(
                     words[:14]
                 )
             )
 
-    clean = []
+    cleaned = []
     seen = set()
 
     for query in queries:
-        normalized = (
-            query
-            .strip()
-            .lower()
-        )
+
+        query = query.strip()
+
+        normalized = query.lower()
 
         if (
-            normalized
+            query
             and normalized not in seen
         ):
-            seen.add(normalized)
-            clean.append(
-                query.strip()
+
+            seen.add(
+                normalized
             )
 
-    return clean[:6]
+            cleaned.append(
+                query
+            )
+
+    return cleaned[:8]
 
 
 def reconstruct_abstract(
-    inverted: dict | None,
+    inverted_index,
 ) -> str:
-    if not inverted:
+
+    if not inverted_index:
         return ""
 
     positions = []
 
-    for word, indexes in inverted.items():
+    for word, indexes in (
+        inverted_index.items()
+    ):
+
         for index in indexes:
+
             positions.append(
                 (
                     index,
@@ -224,6 +278,7 @@ async def search_openalex(
     query: str,
     limit: int = 5,
 ) -> list[dict]:
+
     url = (
         "https://api.openalex.org/works"
         f"?search={quote(query)}"
@@ -231,13 +286,17 @@ async def search_openalex(
         f"&per-page={limit}"
     )
 
-    data = await get_json(url)
+    data = await get_json(
+        url
+    )
+
     results = []
 
     for item in data.get(
         "results",
         [],
     ):
+
         location = (
             item.get(
                 "primary_location"
@@ -249,7 +308,9 @@ async def search_openalex(
             {
                 "source": "OpenAlex",
                 "title": (
-                    item.get("title")
+                    item.get(
+                        "title"
+                    )
                     or "Untitled"
                 ),
                 "year": item.get(
@@ -259,7 +320,9 @@ async def search_openalex(
                     "cited_by_count",
                     0,
                 ),
-                "doi": item.get("doi"),
+                "doi": item.get(
+                    "doi"
+                ),
                 "url": (
                     location.get(
                         "landing_page_url"
@@ -282,6 +345,7 @@ async def search_crossref(
     query: str,
     limit: int = 5,
 ) -> list[dict]:
+
     url = (
         "https://api.crossref.org/works"
         f"?query.bibliographic={quote(query)}"
@@ -289,10 +353,11 @@ async def search_crossref(
         f"&rows={limit}"
     )
 
-    data = await get_json(url)
-    results = []
+    data = await get_json(
+        url
+    )
 
-    for item in (
+    items = (
         data.get(
             "message",
             {},
@@ -301,13 +366,22 @@ async def search_crossref(
             "items",
             [],
         )
-    ):
-        title = (
-            item.get("title")
-            or ["Untitled"]
-        )[0]
+    )
 
-        doi = item.get("DOI")
+    results = []
+
+    for item in items:
+
+        titles = (
+            item.get(
+                "title"
+            )
+            or ["Untitled"]
+        )
+
+        doi = item.get(
+            "DOI"
+        )
 
         date_parts = (
             item.get(
@@ -320,17 +394,19 @@ async def search_crossref(
             )
         )
 
-        year = (
-            date_parts[0][0]
-            if date_parts
+        year = None
+
+        if (
+            date_parts
             and date_parts[0]
-            else None
-        )
+        ):
+
+            year = date_parts[0][0]
 
         results.append(
             {
                 "source": "Crossref",
-                "title": title,
+                "title": titles[0],
                 "year": year,
                 "citations": item.get(
                     "is-referenced-by-count",
@@ -338,7 +414,9 @@ async def search_crossref(
                 ),
                 "doi": doi,
                 "url": (
-                    item.get("URL")
+                    item.get(
+                        "URL"
+                    )
                     or (
                         f"https://doi.org/{doi}"
                         if doi
@@ -346,7 +424,9 @@ async def search_crossref(
                     )
                 ),
                 "abstract": (
-                    item.get("abstract")
+                    item.get(
+                        "abstract"
+                    )
                     or ""
                 ),
             }
@@ -358,7 +438,10 @@ async def search_crossref(
 def make_links(
     query: str,
 ) -> dict:
-    encoded = quote(query)
+
+    encoded = quote(
+        query
+    )
 
     return {
         "google_scholar": (
@@ -385,41 +468,52 @@ def make_links(
 async def research_query(
     query: str,
 ) -> dict:
+
     errors = []
-    openalex = []
-    crossref = []
+
+    openalex_results = []
+    crossref_results = []
 
     try:
-        openalex = await search_openalex(
-            query,
-            5,
+
+        openalex_results = (
+            await search_openalex(
+                query,
+                5,
+            )
         )
 
     except Exception as error:
+
         errors.append(
             f"OpenAlex: {error}"
         )
 
     try:
-        crossref = await search_crossref(
-            query,
-            5,
+
+        crossref_results = (
+            await search_crossref(
+                query,
+                5,
+            )
         )
 
     except Exception as error:
+
         errors.append(
             f"Crossref: {error}"
         )
 
     combined = (
-        openalex
-        + crossref
+        openalex_results
+        + crossref_results
     )
 
     unique = []
     seen = set()
 
     for item in combined:
+
         key = (
             item.get("doi")
             or item.get("url")
@@ -431,10 +525,14 @@ async def research_query(
             not key
             or key in seen
         ):
+
             continue
 
         seen.add(key)
-        unique.append(item)
+
+        unique.append(
+            item
+        )
 
     unique.sort(
         key=lambda item:
@@ -447,7 +545,9 @@ async def research_query(
 
     return {
         "query": query,
-        "links": make_links(query),
+        "links": make_links(
+            query
+        ),
         "papers": unique[:10],
         "errors": errors,
     }
@@ -456,6 +556,7 @@ async def research_query(
 async def run_research(
     dossier: dict,
 ) -> dict:
+
     queries = build_queries(
         dossier
     )
@@ -463,10 +564,13 @@ async def run_research(
     evidence = []
 
     for query in queries:
+
+        result = await research_query(
+            query
+        )
+
         evidence.append(
-            await research_query(
-                query
-            )
+            result
         )
 
         await asyncio.sleep(
@@ -484,6 +588,7 @@ def calculate_novelty(
     dossier: dict,
     research: dict,
 ) -> dict:
+
     evidence = research.get(
         "evidence",
         [],
@@ -492,6 +597,7 @@ def calculate_novelty(
     papers = []
 
     for group in evidence:
+
         papers.extend(
             group.get(
                 "papers",
@@ -509,30 +615,27 @@ def calculate_novelty(
         [],
     )
 
-    paper_texts = [
-        (
-            f"{item.get('title', '')} "
-            f"{item.get('abstract', '')}"
+    proposal_text = (
+        " ".join(
+            concepts
         )
-        for item in papers
-    ]
-
-    # Prior-art distance
-    proposal_text = " ".join(
-        concepts
+        or
+        dossier.get(
+            "document",
+            {},
+        ).get(
+            "title",
+            "",
+        )
     )
 
-    if not proposal_text:
-        proposal_text = (
-            dossier.get(
-                "document",
-                {},
-            )
-            .get(
-                "title",
-                "",
-            )
+    paper_texts = [
+        (
+            f"{paper.get('title', '')} "
+            f"{paper.get('abstract', '')}"
         )
+        for paper in papers
+    ]
 
     similarities = [
         similarity(
@@ -548,24 +651,26 @@ def calculate_novelty(
     )
 
     prior_art_distance = round(
-        max(
-            0.0,
-            min(
-                100.0,
-                (
-                    1.0
-                    - max_similarity
-                )
-                * 100,
-            ),
-        ),
+        (
+            1
+            - max_similarity
+        )
+        * 100,
         1,
     )
 
-    # Concept novelty
+    prior_art_distance = max(
+        0.0,
+        min(
+            100.0,
+            prior_art_distance,
+        )
+    )
+
     concept_scores = []
 
     for concept in concepts:
+
         count = sum(
             1
             for text in paper_texts
@@ -582,39 +687,37 @@ def calculate_novelty(
         )
 
         concept_scores.append(
-            max(
-                0.0,
-                min(
-                    100.0,
-                    (
-                        1.0
-                        - coverage
-                    )
-                    * 100,
-                ),
+            (
+                1
+                - coverage
             )
+            * 100
         )
 
     concept_novelty = round(
         (
-            sum(concept_scores)
-            / len(concept_scores)
+            sum(
+                concept_scores
+            )
+            / len(
+                concept_scores
+            )
         )
         if concept_scores
         else 50.0,
         1,
     )
 
-    # Claim novelty
-    claim_distances = []
+    claim_scores = []
 
     for claim in claims[:10]:
+
         claim_text = claim.get(
             "text",
             "",
         )
 
-        claim_similarity = max(
+        closest = max(
             [
                 similarity(
                     claim_text,
@@ -625,63 +728,71 @@ def calculate_novelty(
             or [0.0]
         )
 
-        claim_distances.append(
-            max(
-                0.0,
-                min(
-                    100.0,
-                    (
-                        1.0
-                        - claim_similarity
-                    )
-                    * 100,
-                ),
+        claim_scores.append(
+            (
+                1
+                - closest
             )
+            * 100
         )
 
     claim_novelty = round(
         (
-            sum(claim_distances)
-            / len(claim_distances)
+            sum(
+                claim_scores
+            )
+            / len(
+                claim_scores
+            )
         )
-        if claim_distances
+        if claim_scores
         else 50.0,
         1,
     )
 
-    # Patent similarity isn't implemented yet.
     patent_distance = None
 
-    # Evidence confidence
-    query_count = len(evidence)
-    paper_count = len(papers)
+    query_count = len(
+        evidence
+    )
 
-    successful_groups = sum(
+    paper_count = len(
+        papers
+    )
+
+    successful_queries = sum(
         1
         for group in evidence
         if (
-            not group.get("errors")
-            and group.get("papers")
+            group.get(
+                "papers"
+            )
+            and not group.get(
+                "errors"
+            )
         )
     )
 
     confidence = min(
         100.0,
         (
-            query_count
-            / 6
+            min(
+                query_count,
+                8,
+            )
+            / 8
             * 45
         )
         + (
             min(
                 paper_count,
-                30,
+                40,
             )
-            / 30
+            / 40
             * 35
         )
         + (
-            successful_groups
+            successful_queries
             / max(
                 1,
                 query_count,
@@ -695,81 +806,87 @@ def calculate_novelty(
         1,
     )
 
-    # Reweight only measured components.
-    weighted_components = [
+    components = [
         (
+            "Prior-art distance",
             prior_art_distance,
             35,
+            True,
         ),
         (
+            "Patent distance",
+            patent_distance,
+            25,
+            False,
+        ),
+        (
+            "Concept novelty",
             concept_novelty,
             20,
+            True,
         ),
         (
+            "Claim novelty",
             claim_novelty,
             15,
+            True,
         ),
         (
+            "Evidence confidence",
             confidence,
             5,
+            True,
         ),
     ]
 
-    total_weight = sum(
+    measured_weight = sum(
         weight
-        for _, weight
-        in weighted_components
+        for _, score, weight, measured
+        in components
+        if measured
+        and score is not None
+    )
+
+    weighted_total = sum(
+        score * weight
+        for _, score, weight, measured
+        in components
+        if measured
+        and score is not None
     )
 
     score = round(
-        (
-            sum(
-                value * weight
-                for value, weight
-                in weighted_components
-            )
-            / total_weight
-        ),
+        weighted_total
+        / measured_weight
+        if measured_weight
+        else 50.0,
         1,
     )
 
     if score >= 80:
-        classification = (
-            "Very High"
-        )
+        classification = "Very High"
 
     elif score >= 65:
         classification = "High"
 
     elif score >= 45:
-        classification = (
-            "Moderate"
-        )
+        classification = "Moderate"
 
     else:
         classification = "Low"
 
     closest = []
-    scored = []
 
-    for paper, sim in zip(
-        papers,
-        similarities,
-    ):
-        scored.append(
-            (
-                sim,
-                paper,
-            )
-        )
-
-    scored.sort(
+    for paper, sim in sorted(
+        zip(
+            papers,
+            similarities,
+        ),
         key=lambda pair:
-            pair[0],
+            pair[1],
         reverse=True,
-    )
+    )[:5]:
 
-    for sim, paper in scored[:5]:
         closest.append(
             {
                 "title": paper.get(
@@ -787,7 +904,8 @@ def calculate_novelty(
                 ),
                 "distance": round(
                     (
-                        1 - sim
+                        1
+                        - sim
                     )
                     * 100,
                     1,
@@ -808,7 +926,7 @@ def calculate_novelty(
                 "weight": 35,
                 "measured": True,
                 "description": (
-                    "Lexical distance from the closest "
+                    "Distance from the closest "
                     "retrieved research evidence."
                 ),
             },
@@ -836,7 +954,7 @@ def calculate_novelty(
                 "measured": True,
                 "description": (
                     "Distance between extracted claims "
-                    "and retrieved evidence."
+                    "and retrieved research evidence."
                 ),
             },
             "evidence_confidence": {
@@ -845,7 +963,7 @@ def calculate_novelty(
                 "measured": True,
                 "description": (
                     "Coverage and success of the "
-                    "retrieval pass."
+                    "research retrieval pass."
                 ),
             },
         },
@@ -853,16 +971,13 @@ def calculate_novelty(
             "query_count": query_count,
             "paper_count": paper_count,
             "successful_query_groups": (
-                successful_groups
+                successful_queries
             ),
             "closest_prior_work": closest,
         },
         "methodology": (
-            "This is an evidence-based screening score, "
-            "not a funding recommendation. Patent distance "
-            "is excluded from the numerical calculation "
-            "until patent similarity is implemented. "
-            "Measured components are renormalised over "
-            "their available weights."
+            "The novelty score is a screening measure based "
+            "on retrieved evidence. It is not a legal patent "
+            "novelty opinion and is not a funding recommendation."
         ),
     }
