@@ -1,30 +1,20 @@
 from __future__ import annotations
 
 from typing import Any
-
-
-def clamp(
-    value: float,
-    minimum: float = 0.0,
-    maximum: float = 100.0,
-) -> float:
-    return max(
-        minimum,
-        min(
-            maximum,
-            value,
-        ),
-    )
+import re
 
 
 def weighted_average(
     components: list[dict[str, Any]],
 ) -> float | None:
+
     measured = [
         item
         for item in components
-        if item.get("measured")
-        and item.get("score") is not None
+        if (
+            item.get("measured")
+            and item.get("score") is not None
+        )
     ]
 
     if not measured:
@@ -50,65 +40,104 @@ def weighted_average(
     )
 
 
-def score_from_presence(
-    present: bool,
-    strong: bool = False,
-) -> dict[str, Any]:
-    if not present:
-        return {
-            "score": None,
-            "measured": False,
-        }
+def classification(
+    score: float | None,
+) -> str:
 
-    return {
-        "score": 85.0 if strong else 65.0,
-        "measured": True,
-    }
+    if score is None:
+        return "Insufficient evidence"
+
+    if score >= 80:
+        return "Very High"
+
+    if score >= 65:
+        return "High"
+
+    if score >= 45:
+        return "Moderate"
+
+    return "Low"
+
+
+def all_text(
+    dossier: dict[str, Any],
+) -> str:
+
+    pages = dossier.get(
+        "page_analysis",
+        [],
+    )
+
+    return " ".join(
+        page.get(
+            "text_preview",
+            "",
+        )
+        for page in pages
+    ).lower()
 
 
 def extract_trl(
     dossier: dict[str, Any],
 ) -> int | None:
-    for claim in dossier.get(
-        "claims",
-        [],
-    ):
-        text = claim.get(
-            "text",
-            "",
-        )
 
-        import re
+    text = all_text(
+        dossier
+    )
 
-        matches = re.findall(
-            r"\bTRL\s*([1-9])\b",
+    patterns = [
+        r"\bTRL\s*([1-9])\b",
+        r"\btechnology readiness level\s*([1-9])\b",
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
             text,
             re.IGNORECASE,
         )
 
-        if matches:
+        if match:
             return int(
-                matches[0]
+                match.group(1)
             )
 
-    for page in dossier.get(
-        "page_analysis",
-        [],
-    ):
-        for kpi in page.get(
-            "kpis",
-            [],
-        ):
-            matches = re.findall(
-                r"\bTRL\s*([1-9])\b",
-                kpi,
-                re.IGNORECASE,
-            )
+    return None
 
-            if matches:
-                return int(
-                    matches[0]
-                )
+
+def count_terms(
+    text: str,
+    terms: list[str],
+) -> int:
+
+    return sum(
+        1
+        for term in terms
+        if term.lower()
+        in text
+    )
+
+
+def tier_score(
+    matches: int,
+    thresholds: tuple[int, int, int] = (
+        1,
+        3,
+        5,
+    ),
+) -> float | None:
+
+    low, medium, high = thresholds
+
+    if matches >= high:
+        return 82.0
+
+    if matches >= medium:
+        return 68.0
+
+    if matches >= low:
+        return 50.0
 
     return None
 
@@ -116,22 +145,10 @@ def extract_trl(
 def calculate_translation(
     dossier: dict[str, Any],
 ) -> dict[str, Any]:
-    trl = extract_trl(
+
+    text = all_text(
         dossier
     )
-
-    page_analysis = dossier.get(
-        "page_analysis",
-        [],
-    )
-
-    all_text = " ".join(
-        page.get(
-            "text_preview",
-            "",
-        )
-        for page in page_analysis
-    ).lower()
 
     claims = dossier.get(
         "claims",
@@ -143,31 +160,32 @@ def calculate_translation(
         [],
     )
 
-    # --------------------------------------------------------
-    # 1. Technical maturity
-    #
-    # Explicit TRL is measured.
-    # No explicit TRL = not measured.
-    # --------------------------------------------------------
+    page_count = len(
+        dossier.get(
+            "page_analysis",
+            [],
+        )
+    )
+
+    trl = extract_trl(
+        dossier
+    )
 
     technical_maturity = None
 
     if trl is not None:
+
         technical_maturity = round(
             (
-                (trl - 1)
+                (
+                    trl
+                    - 1
+                )
                 / 8
             )
             * 100,
             1,
         )
-
-    # --------------------------------------------------------
-    # 2. Scale-up feasibility
-    #
-    # We only score this when the proposal contains
-    # scale-up / pilot / demonstration evidence.
-    # --------------------------------------------------------
 
     scale_terms = [
         "pilot",
@@ -176,29 +194,10 @@ def calculate_translation(
         "scale-up",
         "scale up",
         "commercial scale",
-        "m³/day",
-        "m3/day",
         "continuous operation",
+        "m3/day",
+        "m³/day",
     ]
-
-    scale_matches = sum(
-        1
-        for term in scale_terms
-        if term in all_text
-    )
-
-    scale_up_score = None
-
-    if scale_matches >= 3:
-        scale_up_score = 80.0
-    elif scale_matches == 2:
-        scale_up_score = 65.0
-    elif scale_matches == 1:
-        scale_up_score = 50.0
-
-    # --------------------------------------------------------
-    # 3. Integration feasibility
-    # --------------------------------------------------------
 
     integration_terms = [
         "existing plant",
@@ -211,25 +210,6 @@ def calculate_translation(
         "process integration",
         "deployment",
     ]
-
-    integration_matches = sum(
-        1
-        for term in integration_terms
-        if term in all_text
-    )
-
-    integration_score = None
-
-    if integration_matches >= 4:
-        integration_score = 82.0
-    elif integration_matches >= 2:
-        integration_score = 68.0
-    elif integration_matches == 1:
-        integration_score = 50.0
-
-    # --------------------------------------------------------
-    # 4. Validation quality
-    # --------------------------------------------------------
 
     validation_terms = [
         "validated",
@@ -246,25 +226,6 @@ def calculate_translation(
         "measured results",
     ]
 
-    validation_matches = sum(
-        1
-        for term in validation_terms
-        if term in all_text
-    )
-
-    validation_score = None
-
-    if validation_matches >= 4:
-        validation_score = 82.0
-    elif validation_matches >= 2:
-        validation_score = 67.0
-    elif validation_matches == 1:
-        validation_score = 50.0
-
-    # --------------------------------------------------------
-    # 5. Implementation pathway
-    # --------------------------------------------------------
-
     implementation_terms = [
         "industry partner",
         "industry partners",
@@ -276,31 +237,9 @@ def calculate_translation(
         "commercialisation",
         "commercialization",
         "licensing",
-        "market",
         "adopter",
+        "pilot partner",
     ]
-
-    implementation_matches = sum(
-        1
-        for term in implementation_terms
-        if term in all_text
-    )
-
-    implementation_score = None
-
-    if implementation_matches >= 5:
-        implementation_score = 80.0
-    elif implementation_matches >= 3:
-        implementation_score = 66.0
-    elif implementation_matches >= 1:
-        implementation_score = 48.0
-
-    # --------------------------------------------------------
-    # 6. Execution capability
-    #
-    # We only infer a modest signal from explicit project
-    # planning evidence.
-    # --------------------------------------------------------
 
     execution_terms = [
         "milestone",
@@ -311,25 +250,34 @@ def calculate_translation(
         "project manager",
         "research team",
         "principal investigator",
-        "PI",
         "partner",
         "partners",
     ]
 
-    execution_matches = sum(
-        1
-        for term in execution_terms
-        if term.lower() in all_text
+    scale_matches = count_terms(
+        text,
+        scale_terms,
     )
 
-    execution_score = None
+    integration_matches = count_terms(
+        text,
+        integration_terms,
+    )
 
-    if execution_matches >= 5:
-        execution_score = 78.0
-    elif execution_matches >= 3:
-        execution_score = 65.0
-    elif execution_matches >= 1:
-        execution_score = 48.0
+    validation_matches = count_terms(
+        text,
+        validation_terms,
+    )
+
+    implementation_matches = count_terms(
+        text,
+        implementation_terms,
+    )
+
+    execution_matches = count_terms(
+        text,
+        execution_terms,
+    )
 
     components = [
         {
@@ -337,64 +285,102 @@ def calculate_translation(
             "label": "Technical maturity",
             "weight": 20,
             "score": technical_maturity,
-            "measured": technical_maturity is not None,
+            "measured": (
+                technical_maturity is not None
+            ),
             "basis": (
-                "Explicit TRL extracted from the proposal."
+                "Explicit TRL extracted from "
+                "the proposal."
             ),
         },
         {
             "key": "scale_up",
             "label": "Scale-up feasibility",
             "weight": 20,
-            "score": scale_up_score,
-            "measured": scale_up_score is not None,
+            "score": tier_score(
+                scale_matches
+            ),
+            "measured": (
+                tier_score(
+                    scale_matches
+                )
+                is not None
+            ),
             "basis": (
-                f"{scale_matches} scale-up/pilot indicators "
-                "found in extracted proposal text."
+                f"{scale_matches} scale-up/pilot "
+                "indicators found."
             ),
         },
         {
             "key": "integration",
             "label": "Integration feasibility",
             "weight": 15,
-            "score": integration_score,
-            "measured": integration_score is not None,
+            "score": tier_score(
+                integration_matches
+            ),
+            "measured": (
+                tier_score(
+                    integration_matches
+                )
+                is not None
+            ),
             "basis": (
-                f"{integration_matches} integration indicators "
-                "found in extracted proposal text."
+                f"{integration_matches} integration "
+                "indicators found."
             ),
         },
         {
             "key": "validation",
             "label": "Validation quality",
             "weight": 15,
-            "score": validation_score,
-            "measured": validation_score is not None,
+            "score": tier_score(
+                validation_matches
+            ),
+            "measured": (
+                tier_score(
+                    validation_matches
+                )
+                is not None
+            ),
             "basis": (
-                f"{validation_matches} validation indicators "
-                "found in extracted proposal text."
+                f"{validation_matches} validation "
+                "indicators found."
             ),
         },
         {
             "key": "implementation",
             "label": "Implementation pathway",
             "weight": 15,
-            "score": implementation_score,
-            "measured": implementation_score is not None,
+            "score": tier_score(
+                implementation_matches
+            ),
+            "measured": (
+                tier_score(
+                    implementation_matches
+                )
+                is not None
+            ),
             "basis": (
-                f"{implementation_matches} implementation/adoption "
-                "indicators found."
+                f"{implementation_matches} implementation "
+                "or adoption indicators found."
             ),
         },
         {
             "key": "execution",
             "label": "Execution capability",
             "weight": 15,
-            "score": execution_score,
-            "measured": execution_score is not None,
+            "score": tier_score(
+                execution_matches
+            ),
+            "measured": (
+                tier_score(
+                    execution_matches
+                )
+                is not None
+            ),
             "basis": (
-                f"{execution_matches} execution/planning indicators "
-                "found."
+                f"{execution_matches} execution/planning "
+                "indicators found."
             ),
         },
     ]
@@ -421,18 +407,25 @@ def calculate_translation(
     return {
         "score": score,
         "confidence": confidence,
+        "classification": classification(
+            score
+        ),
         "components": components,
         "inputs": {
             "trl": trl,
-            "claim_count": len(claims),
-            "kpi_count": len(kpis),
-            "page_count": len(page_analysis),
+            "claim_count": len(
+                claims
+            ),
+            "kpi_count": len(
+                kpis
+            ),
+            "page_count": page_count,
         },
         "methodology": (
-            "Translation is assessed from explicit technical "
-            "maturity and observable translation signals in "
-            "the proposal. Missing evidence is not converted "
-            "into a negative score; it is marked unmeasured."
+            "Translation assesses technical maturity, "
+            "scale-up, integration, validation, implementation "
+            "and execution evidence found in the proposal. "
+            "Missing evidence remains unmeasured."
         ),
     }
 
@@ -441,37 +434,26 @@ def calculate_market_viability(
     dossier: dict[str, Any],
     research: dict[str, Any],
 ) -> dict[str, Any]:
-    page_analysis = dossier.get(
-        "page_analysis",
-        []
-    )
 
-    all_text = " ".join(
-        page.get(
-            "text_preview",
-            "",
-        )
-        for page in page_analysis
-    ).lower()
+    text = all_text(
+        dossier
+    )
 
     evidence = research.get(
         "evidence",
-        []
+        [],
     )
 
     papers = []
 
     for group in evidence:
+
         papers.extend(
             group.get(
                 "papers",
-                []
+                [],
             )
         )
-
-    # --------------------------------------------------------
-    # Problem / customer need
-    # --------------------------------------------------------
 
     problem_terms = [
         "problem",
@@ -482,28 +464,8 @@ def calculate_market_viability(
         "cost",
         "inefficiency",
         "constraint",
-        "pain point",
         "operational challenge",
     ]
-
-    problem_matches = sum(
-        1
-        for term in problem_terms
-        if term in all_text
-    )
-
-    problem_score = None
-
-    if problem_matches >= 6:
-        problem_score = 82.0
-    elif problem_matches >= 3:
-        problem_score = 68.0
-    elif problem_matches >= 1:
-        problem_score = 50.0
-
-    # --------------------------------------------------------
-    # Economic proposition
-    # --------------------------------------------------------
 
     economic_terms = [
         "cost reduction",
@@ -525,25 +487,6 @@ def calculate_market_viability(
         "$/m³",
     ]
 
-    economic_matches = sum(
-        1
-        for term in economic_terms
-        if term in all_text
-    )
-
-    economic_score = None
-
-    if economic_matches >= 5:
-        economic_score = 82.0
-    elif economic_matches >= 3:
-        economic_score = 67.0
-    elif economic_matches >= 1:
-        economic_score = 48.0
-
-    # --------------------------------------------------------
-    # Market/adopter evidence
-    # --------------------------------------------------------
-
     adopter_terms = [
         "customer",
         "customers",
@@ -556,54 +499,14 @@ def calculate_market_viability(
         "deployment partner",
         "pilot partner",
         "letter of intent",
-        "LOI",
+        "loi",
         "off-take",
         "offtake",
     ]
 
-    adopter_matches = sum(
-        1
-        for term in adopter_terms
-        if term.lower() in all_text
-    )
-
-    adopter_score = None
-
-    if adopter_matches >= 5:
-        adopter_score = 80.0
-    elif adopter_matches >= 3:
-        adopter_score = 65.0
-    elif adopter_matches >= 1:
-        adopter_score = 45.0
-
-    # --------------------------------------------------------
-    # Competitive advantage
-    #
-    # Uses research result volume as evidence coverage,
-    # but does NOT pretend that retrieval volume alone proves
-    # competitive superiority.
-    # --------------------------------------------------------
-
-    competitive_score = None
-
-    if len(papers) >= 20:
-        competitive_score = 70.0
-    elif len(papers) >= 10:
-        competitive_score = 60.0
-    elif len(papers) >= 5:
-        competitive_score = 50.0
-
-    # --------------------------------------------------------
-    # Regulatory / adoption barrier
-    #
-    # Only measured when proposal text explicitly discusses
-    # regulations, standards, permitting, safety, etc.
-    # --------------------------------------------------------
-
     regulatory_terms = [
         "regulation",
         "regulatory",
-        "regulations",
         "permit",
         "permitting",
         "standard",
@@ -614,20 +517,72 @@ def calculate_market_viability(
         "certification",
     ]
 
-    regulatory_matches = sum(
-        1
-        for term in regulatory_terms
-        if term in all_text
+    problem_matches = count_terms(
+        text,
+        problem_terms,
     )
 
-    regulatory_score = None
+    economic_matches = count_terms(
+        text,
+        economic_terms,
+    )
 
-    if regulatory_matches >= 4:
-        regulatory_score = 75.0
-    elif regulatory_matches >= 2:
-        regulatory_score = 60.0
-    elif regulatory_matches == 1:
-        regulatory_score = 45.0
+    adopter_matches = count_terms(
+        text,
+        adopter_terms,
+    )
+
+    regulatory_matches = count_terms(
+        text,
+        regulatory_terms,
+    )
+
+    problem_score = tier_score(
+        problem_matches,
+        (
+            1,
+            3,
+            6,
+        ),
+    )
+
+    economic_score = tier_score(
+        economic_matches,
+        (
+            1,
+            3,
+            5,
+        ),
+    )
+
+    adopter_score = tier_score(
+        adopter_matches,
+        (
+            1,
+            3,
+            5,
+        ),
+    )
+
+    regulatory_score = tier_score(
+        regulatory_matches,
+        (
+            1,
+            2,
+            4,
+        ),
+    )
+
+    competitive_score = None
+
+    if len(papers) >= 20:
+        competitive_score = 70.0
+
+    elif len(papers) >= 10:
+        competitive_score = 60.0
+
+    elif len(papers) >= 5:
+        competitive_score = 50.0
 
     components = [
         {
@@ -637,8 +592,8 @@ def calculate_market_viability(
             "score": problem_score,
             "measured": problem_score is not None,
             "basis": (
-                f"{problem_matches} problem/need indicators "
-                "found."
+                f"{problem_matches} problem/need "
+                "indicators found."
             ),
         },
         {
@@ -648,20 +603,20 @@ def calculate_market_viability(
             "score": economic_score,
             "measured": economic_score is not None,
             "basis": (
-                f"{economic_matches} economic-value indicators "
-                "found."
+                f"{economic_matches} economic-value "
+                "indicators found."
             ),
         },
         {
             "key": "competitive_advantage",
-            "label": "Competitive advantage evidence",
+            "label": "Competitive evidence",
             "weight": 20,
             "score": competitive_score,
             "measured": competitive_score is not None,
             "basis": (
                 f"{len(papers)} research records retrieved. "
-                "This measures evidence coverage, not "
-                "proof of superiority."
+                "This is evidence coverage, not proof "
+                "of competitive superiority."
             ),
         },
         {
@@ -671,8 +626,8 @@ def calculate_market_viability(
             "score": adopter_score,
             "measured": adopter_score is not None,
             "basis": (
-                f"{adopter_matches} adopter/customer indicators "
-                "found in proposal text."
+                f"{adopter_matches} customer/adopter "
+                "indicators found."
             ),
         },
         {
@@ -682,8 +637,8 @@ def calculate_market_viability(
             "score": adopter_score,
             "measured": adopter_score is not None,
             "basis": (
-                "Uses explicit customer/adopter/commercial "
-                "signals as a provisional pathway indicator."
+                "Uses explicit adopter/customer/"
+                "commercial signals."
             ),
         },
         {
@@ -693,8 +648,8 @@ def calculate_market_viability(
             "score": regulatory_score,
             "measured": regulatory_score is not None,
             "basis": (
-                f"{regulatory_matches} regulatory/safety "
-                "indicators found."
+                f"{regulatory_matches} regulatory/"
+                "safety indicators found."
             ),
         },
         {
@@ -704,7 +659,7 @@ def calculate_market_viability(
             "score": None,
             "measured": False,
             "basis": (
-                "Not measured in the current MVP."
+                "Not measured in this MVP."
             ),
         },
     ]
@@ -731,64 +686,48 @@ def calculate_market_viability(
     return {
         "score": score,
         "confidence": confidence,
+        "classification": classification(
+            score
+        ),
         "components": components,
         "inputs": {
-            "research_records": len(papers),
-            "query_count": len(evidence),
+            "research_records": len(
+                papers
+            ),
+            "query_count": len(
+                evidence
+            ),
         },
         "methodology": (
             "Market viability is a provisional decision-support "
-            "score. It uses only evidence actually present in the "
-            "proposal or retrieved research set. Missing commercial "
-            "evidence remains unmeasured."
+            "measure. It uses only evidence present in the proposal "
+            "or retrieved research set. Missing commercial evidence "
+            "remains unmeasured."
         ),
     }
-
-
-def classification(
-    score: float | None,
-) -> str:
-    if score is None:
-        return "Insufficient evidence"
-
-    if score >= 80:
-        return "Very High"
-
-    if score >= 65:
-        return "High"
-
-    if score >= 45:
-        return "Moderate"
-
-    return "Low"
 
 
 def build_assessment(
     dossier: dict[str, Any],
     research: dict[str, Any],
-    novelty: dict[str, Any] | None = None,
+    novelty: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    translation = calculate_translation(
-        dossier
+
+    translation = (
+        calculate_translation(
+            dossier
+        )
     )
 
-    market = calculate_market_viability(
-        dossier,
-        research,
+    market = (
+        calculate_market_viability(
+            dossier,
+            research,
+        )
     )
 
     return {
         "novelty": novelty,
-        "translation": {
-            **translation,
-            "classification": classification(
-                translation["score"]
-            ),
-        },
-        "market": {
-            **market,
-            "classification": classification(
-                market["score"]
-            ),
-        },
+        "translation": translation,
+        "market": market,
     }
