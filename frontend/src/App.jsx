@@ -15,7 +15,7 @@ import {
   Loader2,
   Search,
   ShieldCheck,
-  Upload,
+  Upload
 } from "lucide-react";
 
 
@@ -36,14 +36,19 @@ const NAV = [
   ],
   [
     "research",
-    "Research & IP",
+    "Research",
     BookOpen
+  ],
+  [
+    "patents",
+    "Patents",
+    ShieldCheck
   ],
   [
     "assessment",
     "Assessment",
     BarChart3
-  ],
+  ]
 ];
 
 
@@ -56,6 +61,7 @@ export default function App() {
     "overview"
   );
 
+
   const [
     documentId,
     setDocumentId
@@ -66,12 +72,14 @@ export default function App() {
       )
   );
 
+
   const [
     dossier,
     setDossier
   ] = useState(
     null
   );
+
 
   const [
     research,
@@ -80,15 +88,17 @@ export default function App() {
     status:
       "not_started",
     queries: [],
-    evidence: [],
+    evidence: []
   });
 
+
   const [
-    novelty,
-    setNovelty
+    patents,
+    setPatents
   ] = useState(
     null
   );
+
 
   const [
     assessment,
@@ -97,12 +107,22 @@ export default function App() {
     null
   );
 
+
+  const [
+    novelty,
+    setNovelty
+  ] = useState(
+    null
+  );
+
+
   const [
     busy,
     setBusy
   ] = useState(
     false
   );
+
 
   const [
     message,
@@ -188,24 +208,29 @@ export default function App() {
       null
     );
 
+    setPatents(
+      null
+    );
+
     setResearch({
       status:
         "not_started",
       queries: [],
-      evidence: [],
+      evidence: []
     });
 
-    setNovelty(
+    setAssessment(
       null
     );
 
-    setAssessment(
+    setNovelty(
       null
     );
 
 
     const form =
       new FormData();
+
 
     form.append(
       "file",
@@ -222,7 +247,7 @@ export default function App() {
             method:
               "POST",
             body:
-              form,
+              form
           }
         );
 
@@ -244,7 +269,7 @@ export default function App() {
 
 
       setMessage(
-        "Proposal loaded. Research is now running in the background."
+        "Proposal loaded. Research and patent-search analysis are running."
       );
 
 
@@ -316,6 +341,10 @@ export default function App() {
             result.assessment
           );
 
+          setPatents(
+            result.patents
+          );
+
 
           if (
             result.status
@@ -370,11 +399,15 @@ export default function App() {
               null
             );
 
+            setPatents(
+              null
+            );
+
             setResearch({
               status:
                 "not_started",
               queries: [],
-              evidence: [],
+              evidence: []
             });
 
             setAssessment(
@@ -386,7 +419,7 @@ export default function App() {
             );
 
             setMessage(
-              "The previous proposal has expired because the Render service restarted. Please upload it again."
+              "The previous proposal expired because Render restarted. Please upload it again."
             );
 
             return;
@@ -434,6 +467,7 @@ export default function App() {
   return (
 
     <div className="app">
+
 
       <aside className="sidebar">
 
@@ -596,9 +630,7 @@ export default function App() {
 
               <button
                 onClick={() =>
-                  setMessage(
-                    ""
-                  )
+                  setMessage("")
                 }
               >
                 ×
@@ -619,21 +651,27 @@ export default function App() {
               dossier={
                 dossier
               }
-              research={
-                research
-              }
+
               assessment={
                 assessment
               }
+
+              patents={
+                patents
+              }
+
               busy={
                 busy
               }
+
               uploadProposal={
                 uploadProposal
               }
+
               setPage={
                 setPage
               }
+
             />
 
           )
@@ -649,9 +687,11 @@ export default function App() {
               dossier={
                 dossier
               }
+
               setPage={
                 setPage
               }
+
             />
 
           )
@@ -667,9 +707,31 @@ export default function App() {
               dossier={
                 dossier
               }
+
               research={
                 research
               }
+
+            />
+
+          )
+        }
+
+
+        {
+          page
+          === "patents"
+          && (
+
+            <PatentPage
+              dossier={
+                dossier
+              }
+
+              patents={
+                patents
+              }
+
             />
 
           )
@@ -685,9 +747,11 @@ export default function App() {
               dossier={
                 dossier
               }
+
               assessment={
                 assessment
               }
+
             />
 
           )
@@ -696,14 +760,16 @@ export default function App() {
       </main>
 
     </div>
+
   );
+
 }
 
 
 function Overview({
   dossier,
-  research,
   assessment,
+  patents,
   busy,
   uploadProposal,
   setPage
@@ -728,10 +794,10 @@ function Overview({
           </h2>
 
           <p>
-            Upload a proposal and let the
-            system investigate its science,
-            novelty, translation and market
-            viability.
+            Extract the science, investigate
+            existing research and patents,
+            then assess novelty, translation
+            and market viability.
           </p>
 
         </div>
@@ -768,9 +834,9 @@ function Overview({
         />
 
         <Stat
-          label="Research"
+          label="Patent searches"
           value={
-            research.evidence?.length
+            patents?.total_queries
             ?? 0
           }
         />
@@ -838,7 +904,8 @@ function Overview({
           </strong>
 
           <span>
-            Analysis and research start automatically.
+            Research and patent queries
+            are generated automatically.
           </span>
 
         </div>
@@ -920,9 +987,6 @@ function Overview({
                 }
               >
                 Document
-                <ArrowUpRight
-                  size={13}
-                />
               </button>
 
 
@@ -934,9 +998,17 @@ function Overview({
                 }
               >
                 Research
-                <Search
-                  size={13}
-                />
+              </button>
+
+
+              <button
+                onClick={() =>
+                  setPage(
+                    "patents"
+                  )
+                }
+              >
+                Patents
               </button>
 
 
@@ -948,9 +1020,6 @@ function Overview({
                 }
               >
                 Assessment
-                <BarChart3
-                  size={13}
-                />
               </button>
 
             </div>
@@ -963,6 +1032,7 @@ function Overview({
     </section>
 
   );
+
 }
 
 
@@ -1050,10 +1120,13 @@ function DocumentPage({
             )
           }
         >
+
           View assessment
+
           <ArrowUpRight
             size={13}
           />
+
         </button>
 
       </div>
@@ -1083,17 +1156,22 @@ function DocumentPage({
                 >
 
                   <div className="page-number">
+
                     PAGE {
                       page.page
                     }
+
                   </div>
 
+
                   <p>
+
                     {
                       page.text_preview
                       ||
                       "No text extracted."
                     }
+
                   </p>
 
                 </article>
@@ -1115,7 +1193,6 @@ function DocumentPage({
             }
           />
 
-
           <AnalysisSection
             title="Claims"
             items={
@@ -1130,7 +1207,6 @@ function DocumentPage({
 
             }
           />
-
 
           <AnalysisSection
             title="KPIs"
@@ -1154,6 +1230,7 @@ function DocumentPage({
     </section>
 
   );
+
 }
 
 
@@ -1183,16 +1260,16 @@ function ResearchPage({
         <div>
 
           <div className="eyebrow">
-            EVIDENCE
+            ACADEMIC LANDSCAPE
           </div>
 
           <h2>
-            Research generated from the proposal
+            Literature and research evidence
           </h2>
 
           <p>
-            Search queries are generated from
-            the technical concepts and claims.
+            Research results generated from
+            concepts and technical claims.
           </p>
 
         </div>
@@ -1245,12 +1322,9 @@ function ResearchPage({
 
               {
                 research.status
-                ===
-                "running"
-
+                === "running"
                   ? "Research is running..."
                   : "No research results yet."
-
               }
 
             </div>
@@ -1263,153 +1337,134 @@ function ResearchPage({
     </section>
 
   );
+
 }
 
 
-function EvidenceGroup({
-  group
+function PatentPage({
+  dossier,
+  patents
 }) {
+
+  if (!dossier) {
+
+    return (
+      <Empty
+        title="No patent context"
+        text="Upload a proposal first."
+      />
+    );
+
+  }
+
+
+  if (!patents) {
+
+    return (
+
+      <section className="workspace">
+
+        <div className="progress-panel">
+
+          <Loader2
+            size={17}
+            className="spin"
+          />
+
+          <div>
+
+            <strong>
+              Building patent searches.
+            </strong>
+
+            <span>
+              Generating targeted queries from
+              the proposal's technical concepts.
+            </span>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    );
+
+  }
+
 
   return (
 
-    <article className="evidence-group">
+    <section className="workspace">
 
-      <div className="evidence-heading">
+      <div className="research-header">
 
         <div>
 
           <div className="eyebrow">
-            SEARCH QUERY
+            PATENT LANDSCAPE
           </div>
 
-          <strong>
-            {
-              group.query
-            }
-          </strong>
+          <h2>
+            Targeted patent research
+          </h2>
+
+          <p>
+            The application generates focused
+            patent queries from the proposal
+            rather than making you search
+            each database manually.
+          </p>
 
         </div>
 
 
-        <span>
+        <div className="patent-count">
 
           {
-            group.papers?.length
-            || 0
+            patents.total_queries
           }
 
-          {" results"}
+          {" searches"}
 
-        </span>
+        </div>
 
       </div>
 
 
-      <div className="evidence-body">
-
-        <div className="source-links">
-
-          <ExternalLink
-            href={
-              group.links?.google_scholar
-            }
-            label="Google Scholar"
-          />
-
-          <ExternalLink
-            href={
-              group.links?.google_patents
-            }
-            label="Google Patents"
-          />
-
-          <ExternalLink
-            href={
-              group.links?.semantic_scholar
-            }
-            label="Semantic Scholar"
-          />
-
-          <ExternalLink
-            href={
-              group.links?.wipo
-            }
-            label="WIPO"
-          />
-
-        </div>
-
+      <div className="patent-source-grid">
 
         {
           (
-            group.papers
+            patents.sources
             || []
           ).map(
-            (
-              paper,
-              index
-            ) => (
+            source => (
 
-              <a
-
-                className="paper"
-
+              <div
+                className="patent-source"
                 key={
-                  index
+                  source.id
                 }
-
-                href={
-                  paper.url
-                  ||
-                  "#"
-                }
-
-                target="_blank"
-
-                rel="noreferrer"
-
               >
 
-                <div className="paper-meta">
-
-                  <span>
-                    {
-                      paper.source
-                    }
-                  </span>
-
-                  <span>
-                    {
-                      paper.year
-                      || "—"
-                    }
-                  </span>
-
-                  <span>
-                    {
-                      paper.citations
-                      || 0
-                    }
-
-                    {" citations"}
-
-                  </span>
-
+                <div className="eyebrow">
+                  PATENT SOURCE
                 </div>
 
-
-                <strong>
+                <h3>
                   {
-                    paper.title
+                    source.name
                   }
-                </strong>
+                </h3>
 
+                <p>
+                  {
+                    source.description
+                  }
+                </p>
 
-                <ArrowUpRight
-                  size={14}
-                />
-
-              </a>
+              </div>
 
             )
           )
@@ -1417,9 +1472,142 @@ function EvidenceGroup({
 
       </div>
 
-    </article>
+
+      <div className="patent-note">
+
+        <ShieldCheck
+          size={17}
+        />
+
+        <div>
+
+          <strong>
+            Search strategy
+          </strong>
+
+          <p>
+            Start with Core Technology,
+            then inspect Application,
+            Performance and Competitor
+            searches. Each search can be
+            opened directly in the selected
+            patent database.
+          </p>
+
+        </div>
+
+      </div>
+
+
+      <div className="patent-query-list">
+
+        {
+          (
+            patents.query_cards
+            || []
+          ).map(
+            (
+              card,
+              index
+            ) => (
+
+              <article
+                className="patent-query"
+                key={
+                  index
+                }
+              >
+
+                <div className="query-meta">
+
+                  <span>
+                    {
+                      formatGroup(
+                        card.group
+                      )
+                    }
+                  </span>
+
+                </div>
+
+
+                <div className="query-string">
+
+                  {card.query}
+
+                </div>
+
+
+                <p>
+                  {
+                    card.group_description
+                  }
+                </p>
+
+
+                <div className="query-actions">
+
+                  <ExternalLink
+                    href={
+                      card.sources
+                        .google_patents
+                    }
+                    label="Google Patents"
+                  />
+
+                  <ExternalLink
+                    href={
+                      card.sources
+                        .wipo
+                    }
+                    label="WIPO PATENTSCOPE"
+                  />
+
+                  <ExternalLink
+                    href={
+                      card.sources
+                        .espacenet
+                    }
+                    label="EPO Espacenet"
+                  />
+
+                  <ExternalLink
+                    href={
+                      card.sources
+                        .uspto
+                    }
+                    label="USPTO"
+                  />
+
+                </div>
+
+              </article>
+
+            )
+          )
+        }
+
+      </div>
+
+
+      <div className="methodology">
+
+        <strong>
+          What this MVP does
+        </strong>
+
+        <p>
+          {
+            patents.methodology
+          }
+        </p>
+
+      </div>
+
+    </section>
 
   );
+
 }
 
 
@@ -1460,8 +1648,8 @@ function AssessmentPage({
             </strong>
 
             <span>
-              The scores appear after the
-              research pass completes.
+              Scores appear after research
+              completes.
             </span>
 
           </div>
@@ -1492,8 +1680,8 @@ function AssessmentPage({
           </h2>
 
           <p>
-            Every calculated number is accompanied
-            by its inputs and measurement basis.
+            Every score exposes its component
+            inputs and measurement basis.
           </p>
 
         </div>
@@ -1530,13 +1718,13 @@ function AssessmentPage({
       <div className="assessment-note">
 
         <strong>
-          These are screening signals, not decisions.
+          These numbers are screening signals.
         </strong>
 
         <p>
-          Missing evidence is marked as
-          "Not measured" rather than converted
-          into a guessed score.
+          They do not replace technical review,
+          patent advice or commercial due diligence.
+          Missing evidence remains unmeasured.
         </p>
 
       </div>
@@ -1568,77 +1756,7 @@ function AssessmentPage({
     </section>
 
   );
-}
 
-
-function ScoreCard({
-  label,
-  data
-}) {
-
-  const score =
-    data?.score;
-
-
-  return (
-
-    <div className="score-card">
-
-      <span className="eyebrow">
-        {label}
-      </span>
-
-
-      <strong>
-
-        {
-          score != null
-            ? score
-            : "—"
-        }
-
-        <small>
-
-          {
-            score != null
-              ? "/100"
-              : ""
-          }
-
-        </small>
-
-      </strong>
-
-
-      <span className="score-class">
-
-        {
-          data?.classification
-          ||
-          "Insufficient evidence"
-        }
-
-      </span>
-
-
-      <div className="score-card-meta">
-
-        Confidence:
-
-        {" "}
-
-        {
-          data?.confidence
-          != null
-            ? `${data.confidence}/100`
-            : "—"
-        }
-
-      </div>
-
-    </div>
-
-  );
 }
 
 
@@ -1677,9 +1795,9 @@ function AssessmentSection({
 
           {
             data.score
-            != null
+              != null
               ? `${data.score}/100`
-              : "Not enough evidence"
+              : "Insufficient evidence"
           }
 
         </div>
@@ -1783,6 +1901,229 @@ function AssessmentSection({
     </section>
 
   );
+
+}
+
+
+function ScoreCard({
+  label,
+  data
+}) {
+
+  const score =
+    data?.score;
+
+
+  return (
+
+    <div className="score-card">
+
+      <span className="eyebrow">
+        {label}
+      </span>
+
+
+      <strong>
+
+        {
+          score != null
+            ? score
+            : "—"
+        }
+
+        <small>
+
+          {
+            score != null
+              ? "/100"
+              : ""
+          }
+
+        </small>
+
+      </strong>
+
+
+      <span className="score-class">
+
+        {
+          data?.classification
+          ||
+          "Insufficient evidence"
+        }
+
+      </span>
+
+
+      <div className="score-card-meta">
+
+        Confidence:
+
+        {" "}
+
+        {
+          data?.confidence
+          != null
+            ? `${data.confidence}/100`
+            : "—"
+        }
+
+      </div>
+
+    </div>
+
+  );
+
+}
+
+
+function EvidenceGroup({
+  group
+}) {
+
+  return (
+
+    <article className="evidence-group">
+
+      <div className="evidence-heading">
+
+        <div>
+
+          <div className="eyebrow">
+            SEARCH QUERY
+          </div>
+
+          <strong>
+            {
+              group.query
+            }
+          </strong>
+
+        </div>
+
+
+        <span>
+
+          {
+            group.papers?.length
+            || 0
+          }
+
+          {" results"}
+
+        </span>
+
+      </div>
+
+
+      <div className="evidence-body">
+
+        <div className="source-links">
+
+          <ExternalLink
+            href={
+              group.links?.google_scholar
+            }
+            label="Google Scholar"
+          />
+
+          <ExternalLink
+            href={
+              group.links?.google_patents
+            }
+            label="Google Patents"
+          />
+
+          <ExternalLink
+            href={
+              group.links?.semantic_scholar
+            }
+            label="Semantic Scholar"
+          />
+
+          <ExternalLink
+            href={
+              group.links?.wipo
+            }
+            label="WIPO"
+          />
+
+        </div>
+
+
+        {
+          (
+            group.papers
+            || []
+          ).map(
+            (
+              paper,
+              index
+            ) => (
+
+              <a
+                className="paper"
+                href={
+                  paper.url
+                  ||
+                  "#"
+                }
+                target="_blank"
+                rel="noreferrer"
+                key={
+                  index
+                }
+              >
+
+                <div className="paper-meta">
+
+                  <span>
+                    {
+                      paper.source
+                    }
+                  </span>
+
+                  <span>
+                    {
+                      paper.year
+                      || "—"
+                    }
+                  </span>
+
+                  <span>
+                    {
+                      paper.citations
+                      || 0
+                    }
+                    {" citations"}
+                  </span>
+
+                </div>
+
+
+                <strong>
+                  {
+                    paper.title
+                  }
+                </strong>
+
+
+                <ArrowUpRight
+                  size={14}
+                />
+
+              </a>
+
+            )
+          )
+        }
+
+      </div>
+
+    </article>
+
+  );
+
 }
 
 
@@ -1837,6 +2178,7 @@ function AnalysisSection({
     </div>
 
   );
+
 }
 
 
@@ -1869,6 +2211,36 @@ function ExternalLink({
     </a>
 
   );
+
+}
+
+
+function formatGroup(
+  group
+) {
+
+  const map = {
+
+    core:
+      "Core technology",
+
+    application:
+      "Application",
+
+    performance:
+      "Performance",
+
+    competitor:
+      "Competitive landscape"
+
+  };
+
+
+  return (
+    map[group]
+    || group
+  );
+
 }
 
 
@@ -1892,6 +2264,7 @@ function Stat({
     </div>
 
   );
+
 }
 
 
@@ -1923,4 +2296,5 @@ function Empty({
     </section>
 
   );
+
 }
