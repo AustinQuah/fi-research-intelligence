@@ -1,4 +1,5 @@
 import React, {
+  Component,
   useEffect,
   useState
 } from "react";
@@ -52,7 +53,125 @@ const NAV = [
 ];
 
 
+class AppErrorBoundary extends Component {
+
+  constructor(props) {
+    super(props);
+
+    this.state = {
+      hasError: false,
+      error: null
+    };
+  }
+
+
+  static getDerivedStateFromError(
+    error
+  ) {
+
+    return {
+      hasError: true,
+      error
+    };
+
+  }
+
+
+  componentDidCatch(
+    error,
+    errorInfo
+  ) {
+
+    console.error(
+      "FI Research UI crashed:",
+      error
+    );
+
+    console.error(
+      "Component stack:",
+      errorInfo?.componentStack
+    );
+
+  }
+
+
+  render() {
+
+    if (
+      this.state.hasError
+    ) {
+
+      return (
+
+        <div className="fatal-error">
+
+          <div className="fatal-error-card">
+
+            <div className="eyebrow">
+              APPLICATION ERROR
+            </div>
+
+            <h2>
+              The page hit a frontend error.
+            </h2>
+
+            <p>
+              The application caught the error
+              instead of leaving the page blank.
+            </p>
+
+
+            <div className="fatal-error-code">
+
+              {
+                this.state.error?.message
+                ||
+                "Unknown JavaScript error."
+              }
+
+            </div>
+
+
+            <button
+              onClick={() =>
+                window.location.reload()
+              }
+            >
+              Reload application
+            </button>
+
+          </div>
+
+        </div>
+
+      );
+
+    }
+
+
+    return this.props.children;
+
+  }
+
+}
+
+
 export default function App() {
+
+  return (
+
+    <AppErrorBoundary>
+
+      <ResearchApp />
+
+    </AppErrorBoundary>
+
+  );
+
+}
+
+
+function ResearchApp() {
 
   const [
     page,
@@ -147,7 +266,14 @@ export default function App() {
           options
         );
 
-    } catch {
+    } catch (
+      error
+    ) {
+
+      console.error(
+        "Network error:",
+        error
+      );
 
       throw new Error(
         "Could not reach the Render research server."
@@ -157,6 +283,7 @@ export default function App() {
 
 
     let data = null;
+
 
     try {
 
@@ -199,6 +326,7 @@ export default function App() {
       true
     );
 
+
     setMessage(
       "Uploading and reading proposal..."
     );
@@ -208,16 +336,16 @@ export default function App() {
       null
     );
 
-    setPatents(
-      null
-    );
-
     setResearch({
       status:
         "not_started",
       queries: [],
       evidence: []
     });
+
+    setPatents(
+      null
+    );
 
     setAssessment(
       null
@@ -252,6 +380,17 @@ export default function App() {
         );
 
 
+      if (
+        !result?.id
+      ) {
+
+        throw new Error(
+          "The server did not return a document ID."
+        );
+
+      }
+
+
       localStorage.setItem(
         "fi_document_id",
         result.id
@@ -269,7 +408,7 @@ export default function App() {
 
 
       setMessage(
-        "Proposal loaded. Research and patent-search analysis are running."
+        "Proposal loaded. Research is running in the background."
       );
 
 
@@ -281,6 +420,12 @@ export default function App() {
     } catch (
       error
     ) {
+
+      console.error(
+        "Upload error:",
+        error
+      );
+
 
       setMessage(
         error.message
@@ -305,9 +450,11 @@ export default function App() {
       }
 
 
-      let stopped = false;
+      let stopped =
+        false;
 
-      let timer = null;
+      let timer =
+        null;
 
 
       async function poll() {
@@ -320,39 +467,56 @@ export default function App() {
             );
 
 
-          if (stopped) {
+          if (
+            stopped
+          ) {
             return;
           }
 
 
           setDossier(
-            result.dossier
+            result?.dossier
+            || null
           );
+
 
           setResearch(
-            result.research
+            result?.research
+            || {
+              status:
+                "not_started",
+              queries: [],
+              evidence: []
+            }
           );
+
 
           setNovelty(
-            result.novelty
+            result?.novelty
+            || null
           );
+
 
           setAssessment(
-            result.assessment
+            result?.assessment
+            || null
           );
 
+
           setPatents(
-            result.patents
+            result?.patents
+            || null
           );
 
 
           if (
-            result.status
-            === "error"
+            result?.status
+            ===
+            "error"
           ) {
 
             setMessage(
-              result.error
+              result?.error
               ||
               "Document processing failed."
             );
@@ -363,8 +527,9 @@ export default function App() {
 
 
           if (
-            result.research?.status
-            === "running"
+            result?.research?.status
+            ===
+            "running"
           ) {
 
             timer =
@@ -379,6 +544,12 @@ export default function App() {
           error
         ) {
 
+          console.error(
+            "Polling error:",
+            error
+          );
+
+
           if (
             error.message
               .toLowerCase()
@@ -391,17 +562,21 @@ export default function App() {
               "fi_document_id"
             );
 
+
             setDocumentId(
               null
             );
+
 
             setDossier(
               null
             );
 
+
             setPatents(
               null
             );
+
 
             setResearch({
               status:
@@ -410,24 +585,30 @@ export default function App() {
               evidence: []
             });
 
+
             setAssessment(
               null
             );
+
 
             setNovelty(
               null
             );
 
+
             setMessage(
               "The previous proposal expired because Render restarted. Please upload it again."
             );
+
 
             return;
 
           }
 
 
-          if (!stopped) {
+          if (
+            !stopped
+          ) {
 
             setMessage(
               error.message
@@ -445,9 +626,13 @@ export default function App() {
 
       return () => {
 
-        stopped = true;
+        stopped =
+          true;
 
-        if (timer) {
+
+        if (
+          timer
+        ) {
 
           window.clearTimeout(
             timer
@@ -499,59 +684,62 @@ export default function App() {
 
         <nav>
 
-          {NAV.map(
-            (
-              [
-                id,
-                label,
-                Icon
-              ]
-            ) => (
+          {
+            NAV.map(
+              (
+                [
+                  id,
+                  label,
+                  Icon
+                ]
+              ) => (
 
-              <button
+                <button
 
-                key={
-                  id
-                }
+                  key={
+                    id
+                  }
 
-                className={
-                  page === id
-                    ? "nav active"
-                    : "nav"
-                }
+                  className={
+                    page === id
+                      ? "nav active"
+                      : "nav"
+                  }
 
-                onClick={
-                  () =>
+                  onClick={() =>
                     setPage(
                       id
                     )
-                }
+                  }
 
-              >
+                >
 
-                <Icon
-                  size={16}
-                />
+                  <Icon
+                    size={16}
+                  />
 
-                <span>
-                  {label}
-                </span>
+                  <span>
+                    {
+                      label
+                    }
+                  </span>
 
 
-                {
-                  page === id
-                  && (
-                    <ChevronRight
-                      size={13}
-                      className="nav-arrow"
-                    />
-                  )
-                }
+                  {
+                    page === id
+                    && (
+                      <ChevronRight
+                        size={13}
+                        className="nav-arrow"
+                      />
+                    )
+                  }
 
-              </button>
+                </button>
 
+              )
             )
-          )}
+          }
 
         </nav>
 
@@ -582,12 +770,17 @@ export default function App() {
             <h1>
 
               {
-                NAV.find(
-                  item =>
-                    item[0]
-                    ===
-                    page
-                )?.[1]
+                (
+                  NAV.find(
+                    item =>
+                      item[0]
+                      ===
+                      page
+                  )
+                  || []
+                )[1]
+                ||
+                "Workspace"
               }
 
             </h1>
@@ -604,8 +797,8 @@ export default function App() {
             {
               busy
                 ? "Processing"
-                : research.status
-                  === "running"
+                : research.status ===
+                    "running"
                   ? "Researching"
                   : "Ready"
             }
@@ -643,8 +836,7 @@ export default function App() {
 
 
         {
-          page
-          === "overview"
+          page === "overview"
           && (
 
             <Overview
@@ -679,8 +871,7 @@ export default function App() {
 
 
         {
-          page
-          === "document"
+          page === "document"
           && (
 
             <DocumentPage
@@ -699,8 +890,7 @@ export default function App() {
 
 
         {
-          page
-          === "research"
+          page === "research"
           && (
 
             <ResearchPage
@@ -719,8 +909,7 @@ export default function App() {
 
 
         {
-          page
-          === "patents"
+          page === "patents"
           && (
 
             <PatentPage
@@ -739,8 +928,7 @@ export default function App() {
 
 
         {
-          page
-          === "assessment"
+          page === "assessment"
           && (
 
             <AssessmentPage
@@ -829,7 +1017,8 @@ function Overview({
           label="Pages"
           value={
             dossier?.document?.pages
-            ?? "—"
+            ??
+            "—"
           }
         />
 
@@ -837,7 +1026,8 @@ function Overview({
           label="Patent searches"
           value={
             patents?.total_queries
-            ?? 0
+            ??
+            0
           }
         />
 
@@ -896,11 +1086,13 @@ function Overview({
         <div className="upload-copy">
 
           <strong>
+
             {
               busy
                 ? "Reading proposal..."
                 : "Choose a proposal"
             }
+
           </strong>
 
           <span>
@@ -957,7 +1149,6 @@ function Overview({
               </h3>
 
               <p>
-
                 {
                   (
                     dossier.concepts
@@ -971,7 +1162,6 @@ function Overview({
                     " · "
                   )
                 }
-
               </p>
 
             </div>
@@ -1044,10 +1234,12 @@ function DocumentPage({
   if (!dossier) {
 
     return (
+
       <Empty
         title="No proposal loaded"
         text="Upload a proposal from Overview."
       />
+
     );
 
   }
@@ -1113,12 +1305,16 @@ function DocumentPage({
 
 
         <button
+
           className="research-button"
-          onClick={() =>
-            setPage(
-              "assessment"
-            )
+
+          onClick={
+            () =>
+              setPage(
+                "assessment"
+              )
           }
+
         >
 
           View assessment
@@ -1322,7 +1518,8 @@ function ResearchPage({
 
               {
                 research.status
-                === "running"
+                ===
+                "running"
                   ? "Research is running..."
                   : "No research results yet."
               }
@@ -1378,8 +1575,8 @@ function PatentPage({
             </strong>
 
             <span>
-              Generating targeted queries from
-              the proposal's technical concepts.
+              Generating targeted searches
+              from the technical concepts.
             </span>
 
           </div>
@@ -1410,10 +1607,10 @@ function PatentPage({
           </h2>
 
           <p>
-            The application generates focused
-            patent queries from the proposal
-            rather than making you search
-            each database manually.
+            Focused searches are generated
+            separately for core technology,
+            applications, performance and
+            competing approaches.
           </p>
 
         </div>
@@ -1423,6 +1620,8 @@ function PatentPage({
 
           {
             patents.total_queries
+            ??
+            0
           }
 
           {" searches"}
@@ -1486,12 +1685,12 @@ function PatentPage({
           </strong>
 
           <p>
-            Start with Core Technology,
-            then inspect Application,
-            Performance and Competitor
-            searches. Each search can be
-            opened directly in the selected
-            patent database.
+            Core technology searches find
+            direct prior art. Application
+            searches investigate use cases.
+            Performance searches target
+            technical claims. Competitive
+            searches look for alternatives.
           </p>
 
         </div>
@@ -1533,7 +1732,9 @@ function PatentPage({
 
                 <div className="query-string">
 
-                  {card.query}
+                  {
+                    card.query
+                  }
 
                 </div>
 
@@ -1549,32 +1750,28 @@ function PatentPage({
 
                   <ExternalLink
                     href={
-                      card.sources
-                        .google_patents
+                      card.sources?.google_patents
                     }
                     label="Google Patents"
                   />
 
                   <ExternalLink
                     href={
-                      card.sources
-                        .wipo
+                      card.sources?.wipo
                     }
                     label="WIPO PATENTSCOPE"
                   />
 
                   <ExternalLink
                     href={
-                      card.sources
-                        .espacenet
+                      card.sources?.espacenet
                     }
                     label="EPO Espacenet"
                   />
 
                   <ExternalLink
                     href={
-                      card.sources
-                        .uspto
+                      card.sources?.uspto
                     }
                     label="USPTO"
                   />
@@ -1593,7 +1790,7 @@ function PatentPage({
       <div className="methodology">
 
         <strong>
-          What this MVP does
+          MVP methodology
         </strong>
 
         <p>
@@ -1628,7 +1825,16 @@ function AssessmentPage({
   }
 
 
-  if (!assessment) {
+  const safeAssessment =
+    (
+      assessment
+      && typeof assessment === "object"
+    )
+      ? assessment
+      : null;
+
+
+  if (!safeAssessment) {
 
     return (
 
@@ -1636,10 +1842,21 @@ function AssessmentPage({
 
         <div className="progress-panel">
 
-          <Loader2
-            size={17}
-            className="spin"
-          />
+          {
+            assessment === null
+              ? (
+                <Loader2
+                  size={17}
+                  className="spin"
+                />
+              )
+              : (
+                <BarChart3
+                  size={17}
+                />
+              )
+          }
+
 
           <div>
 
@@ -1648,11 +1865,43 @@ function AssessmentPage({
             </strong>
 
             <span>
-              Scores appear after research
-              completes.
+              Novelty, translation and market
+              viability appear after research.
             </span>
 
           </div>
+
+        </div>
+
+
+        <div className="assessment-debug">
+
+          <div className="eyebrow">
+            DEBUG STATE
+          </div>
+
+          <p>
+
+            Document loaded successfully.
+
+            {" "}
+
+            Research status:
+
+            {" "}
+
+            <strong>
+              {
+                (
+                  dossier
+                  && dossier.research_status
+                )
+                ||
+                "background"
+              }
+            </strong>
+
+          </p>
 
         </div>
 
@@ -1661,6 +1910,30 @@ function AssessmentPage({
     );
 
   }
+
+
+  const safeNovelty =
+    isObject(
+      safeAssessment.novelty
+    )
+      ? safeAssessment.novelty
+      : null;
+
+
+  const safeTranslation =
+    isObject(
+      safeAssessment.translation
+    )
+      ? safeAssessment.translation
+      : null;
+
+
+  const safeMarket =
+    isObject(
+      safeAssessment.market
+    )
+      ? safeAssessment.market
+      : null;
 
 
   return (
@@ -1694,21 +1967,23 @@ function AssessmentPage({
         <ScoreCard
           label="Novelty"
           data={
-            assessment.novelty
+            safeNovelty
           }
         />
+
 
         <ScoreCard
           label="Translation"
           data={
-            assessment.translation
+            safeTranslation
           }
         />
+
 
         <ScoreCard
           label="Market viability"
           data={
-            assessment.market
+            safeMarket
           }
         />
 
@@ -1718,13 +1993,14 @@ function AssessmentPage({
       <div className="assessment-note">
 
         <strong>
-          These numbers are screening signals.
+          These are screening signals, not decisions.
         </strong>
 
         <p>
-          They do not replace technical review,
-          patent advice or commercial due diligence.
-          Missing evidence remains unmeasured.
+          Missing evidence is not turned into
+          an invented score. Components that
+          cannot be measured remain explicitly
+          marked as unmeasured.
         </p>
 
       </div>
@@ -1733,7 +2009,7 @@ function AssessmentPage({
       <AssessmentSection
         title="Novelty"
         data={
-          assessment.novelty
+          safeNovelty
         }
       />
 
@@ -1741,7 +2017,7 @@ function AssessmentPage({
       <AssessmentSection
         title="Translation"
         data={
-          assessment.translation
+          safeTranslation
         }
       />
 
@@ -1749,11 +2025,111 @@ function AssessmentPage({
       <AssessmentSection
         title="Market viability"
         data={
-          assessment.market
+          safeMarket
         }
       />
 
     </section>
+
+  );
+
+}
+
+
+function ScoreCard({
+  label,
+  data
+}) {
+
+  if (!data) {
+
+    return (
+
+      <div className="score-card">
+
+        <span className="eyebrow">
+          {label}
+        </span>
+
+        <strong>
+          —
+        </strong>
+
+        <span className="score-class">
+          Insufficient evidence
+        </span>
+
+        <div className="score-card-meta">
+          No assessment data returned.
+        </div>
+
+      </div>
+
+    );
+
+  }
+
+
+  return (
+
+    <div className="score-card">
+
+      <span className="eyebrow">
+        {label}
+      </span>
+
+
+      <strong>
+
+        {
+          data.score
+          != null
+            ? data.score
+            : "—"
+        }
+
+
+        <small>
+
+          {
+            data.score
+            != null
+              ? "/100"
+              : ""
+          }
+
+        </small>
+
+      </strong>
+
+
+      <span className="score-class">
+
+        {
+          data.classification
+          ||
+          "Insufficient evidence"
+        }
+
+      </span>
+
+
+      <div className="score-card-meta">
+
+        Confidence:
+
+        {" "}
+
+        {
+          data.confidence
+          != null
+            ? `${data.confidence}/100`
+            : "—"
+        }
+
+      </div>
+
+    </div>
 
   );
 
@@ -1766,8 +2142,46 @@ function AssessmentSection({
 }) {
 
   if (!data) {
-    return null;
+
+    return (
+
+      <section className="assessment-section">
+
+        <div className="assessment-section-header">
+
+          <div>
+
+            <h3>
+              {title}
+            </h3>
+
+            <p>
+              No assessment data was returned
+              for this category.
+            </p>
+
+          </div>
+
+
+          <div className="formula-score">
+            —
+          </div>
+
+        </div>
+
+      </section>
+
+    );
+
   }
+
+
+  const components =
+    Array.isArray(
+      data.components
+    )
+      ? data.components
+      : [];
 
 
   return (
@@ -1785,6 +2199,8 @@ function AssessmentSection({
           <p>
             {
               data.methodology
+              ||
+              "Assessment methodology not supplied."
             }
           </p>
 
@@ -1795,7 +2211,7 @@ function AssessmentSection({
 
           {
             data.score
-              != null
+            != null
               ? `${data.score}/100`
               : "Insufficient evidence"
           }
@@ -1805,172 +2221,137 @@ function AssessmentSection({
       </div>
 
 
-      <div className="component-table">
+      {
+        components.length === 0
 
-        <div className="component-row component-head">
+          ? (
 
-          <span>
-            Component
-          </span>
+            <div className="empty-inline">
+              No component data was returned.
+            </div>
 
-          <span>
-            Weight
-          </span>
+          )
 
-          <span>
-            Score
-          </span>
+          : (
 
-          <span>
-            Status
-          </span>
+            <div className="component-table">
 
-        </div>
-
-
-        {
-          (
-            data.components
-            || []
-          ).map(
-            (
-              item,
-              index
-            ) => (
-
-              <div
-                className="component-row"
-                key={
-                  index
-                }
-              >
+              <div className="component-row component-head">
 
                 <span>
-
-                  <strong>
-                    {
-                      item.label
-                    }
-                  </strong>
-
-                  <small>
-                    {
-                      item.basis
-                    }
-                  </small>
-
+                  Component
                 </span>
 
-
                 <span>
-                  {
-                    item.weight
-                  }%
+                  Weight
                 </span>
 
-
                 <span>
-
-                  {
-                    item.measured
-                      ? item.score
-                      : "—"
-                  }
-
+                  Score
                 </span>
 
-
                 <span>
-
-                  {
-                    item.measured
-                      ? "Measured"
-                      : "Not measured"
-                  }
-
+                  Status
                 </span>
 
               </div>
 
-            )
-          )
-        }
 
-      </div>
+              {
+                components.map(
+                  (
+                    item,
+                    index
+                  ) => {
+
+                    const safeItem =
+                      item
+                      && typeof item === "object"
+                        ? item
+                        : {};
+
+
+                    return (
+
+                      <div
+                        className="component-row"
+                        key={
+                          index
+                        }
+                      >
+
+                        <span>
+
+                          <strong>
+                            {
+                              safeItem.label
+                              ||
+                              `Component ${index + 1}`
+                            }
+                          </strong>
+
+                          <small>
+                            {
+                              safeItem.basis
+                              ||
+                              "No calculation basis supplied."
+                            }
+                          </small>
+
+                        </span>
+
+
+                        <span>
+
+                          {
+                            safeItem.weight
+                            != null
+                              ? `${safeItem.weight}%`
+                              : "—"
+                          }
+
+                        </span>
+
+
+                        <span>
+
+                          {
+                            safeItem.measured
+                            && safeItem.score
+                              != null
+
+                              ? safeItem.score
+
+                              : "—"
+                          }
+
+                        </span>
+
+
+                        <span>
+
+                          {
+                            safeItem.measured
+                              ? "Measured"
+                              : "Not measured"
+                          }
+
+                        </span>
+
+                      </div>
+
+                    );
+
+                  }
+                )
+              }
+
+            </div>
+
+          )
+      }
 
     </section>
-
-  );
-
-}
-
-
-function ScoreCard({
-  label,
-  data
-}) {
-
-  const score =
-    data?.score;
-
-
-  return (
-
-    <div className="score-card">
-
-      <span className="eyebrow">
-        {label}
-      </span>
-
-
-      <strong>
-
-        {
-          score != null
-            ? score
-            : "—"
-        }
-
-        <small>
-
-          {
-            score != null
-              ? "/100"
-              : ""
-          }
-
-        </small>
-
-      </strong>
-
-
-      <span className="score-class">
-
-        {
-          data?.classification
-          ||
-          "Insufficient evidence"
-        }
-
-      </span>
-
-
-      <div className="score-card-meta">
-
-        Confidence:
-
-        {" "}
-
-        {
-          data?.confidence
-          != null
-            ? `${data.confidence}/100`
-            : "—"
-        }
-
-      </div>
-
-    </div>
 
   );
 
@@ -1980,6 +2361,16 @@ function ScoreCard({
 function EvidenceGroup({
   group
 }) {
+
+  if (
+    !group
+    || typeof group !== "object"
+  ) {
+
+    return null;
+
+  }
+
 
   return (
 
@@ -1996,6 +2387,8 @@ function EvidenceGroup({
           <strong>
             {
               group.query
+              ||
+              "Unnamed query"
             }
           </strong>
 
@@ -2005,8 +2398,11 @@ function EvidenceGroup({
         <span>
 
           {
-            group.papers?.length
-            || 0
+            Array.isArray(
+              group.papers
+            )
+              ? group.papers.length
+              : 0
           }
 
           {" results"}
@@ -2053,8 +2449,11 @@ function EvidenceGroup({
 
         {
           (
-            group.papers
-            || []
+            Array.isArray(
+              group.papers
+            )
+              ? group.papers
+              : []
           ).map(
             (
               paper,
@@ -2064,9 +2463,8 @@ function EvidenceGroup({
               <a
                 className="paper"
                 href={
-                  paper.url
-                  ||
-                  "#"
+                  paper?.url
+                  || "#"
                 }
                 target="_blank"
                 rel="noreferrer"
@@ -2079,21 +2477,25 @@ function EvidenceGroup({
 
                   <span>
                     {
-                      paper.source
+                      paper?.source
+                      ||
+                      "Source"
                     }
                   </span>
 
                   <span>
                     {
-                      paper.year
-                      || "—"
+                      paper?.year
+                      ||
+                      "—"
                     }
                   </span>
 
                   <span>
                     {
-                      paper.citations
-                      || 0
+                      paper?.citations
+                      ||
+                      0
                     }
                     {" citations"}
                   </span>
@@ -2103,7 +2505,9 @@ function EvidenceGroup({
 
                 <strong>
                   {
-                    paper.title
+                    paper?.title
+                    ||
+                    "Untitled result"
                   }
                 </strong>
 
@@ -2132,6 +2536,14 @@ function AnalysisSection({
   items
 }) {
 
+  const safeItems =
+    Array.isArray(
+      items
+    )
+      ? items
+      : [];
+
+
   return (
 
     <div className="analysis-section">
@@ -2142,8 +2554,9 @@ function AnalysisSection({
 
 
       {
-        items.length
-          ? items
+        safeItems.length
+
+          ? safeItems
             .slice(
               0,
               12
@@ -2160,7 +2573,9 @@ function AnalysisSection({
                     index
                   }
                 >
-                  {item}
+                  {
+                    item
+                  }
                 </div>
 
               )
@@ -2202,7 +2617,9 @@ function ExternalLink({
       rel="noreferrer"
     >
 
-      {label}
+      {
+        label
+      }
 
       <ArrowUpRight
         size={11}
@@ -2219,7 +2636,7 @@ function formatGroup(
   group
 ) {
 
-  const map = {
+  const labels = {
 
     core:
       "Core technology",
@@ -2237,8 +2654,26 @@ function formatGroup(
 
 
   return (
-    map[group]
-    || group
+    labels[group]
+    ||
+    group
+    ||
+    "Patent search"
+  );
+
+}
+
+
+function isObject(
+  value
+) {
+
+  return (
+    value !== null
+    &&
+    typeof value === "object"
+    &&
+    !Array.isArray(value)
   );
 
 }
@@ -2254,11 +2689,15 @@ function Stat({
     <div className="stat">
 
       <span>
-        {label}
+        {
+          label
+        }
       </span>
 
       <strong>
-        {value}
+        {
+          value
+        }
       </strong>
 
     </div>
@@ -2284,11 +2723,15 @@ function Empty({
         />
 
         <h3>
-          {title}
+          {
+            title
+          }
         </h3>
 
         <p>
-          {text}
+          {
+            text
+          }
         </p>
 
       </div>
